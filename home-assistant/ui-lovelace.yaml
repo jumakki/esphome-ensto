@@ -1,0 +1,31 @@
+title: Home
+views:
+  - title: Ensto
+    cards:
+      - type: history-graph
+        entities:
+          - entity: sensor.ensto1_room_temperature
+            name: "Temperature"
+          - entity: sensor.ensto1_target_temperature
+            name: "Target"
+# some external sensor for temperature reference
+#          - entity: sensor.bedroom_temperature
+#            name: "External"
+      - type: history-graph
+        entities:
+          - entity: sensor.ensto1_temperature_calibration_value
+            name: "Calibration value"
+          - entity: sensor.ensto1_temperature_boost_offset
+            name: "Boost offset"
+      - type: history-graph
+        entities:
+          - entity: sensor.ensto1_temperature_boost_minutes_left
+            name: "Boost minutes left"
+      - type: history-graph
+        entities:
+          - entity: binary_sensor.ensto1_relay_state
+            name: "Heat relay"
+          - entity: binary_sensor.ensto1_boost_status
+            name: "Boost"
+          - entity: binary_sensor.ensto1_connection_status
+            name: "Connection"

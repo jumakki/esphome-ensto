@@ -1,0 +1,16 @@
+# docker-compose.yaml file
+version: '3.5'
+
+services:
+    esphome:
+        image: esphome/esphome
+        container_name: esphome-ensto
+        ports:
+            - 6052:6052
+        volumes:
+            - ./config:/config
+        network_mode: host
+        # Important to flash using USB
+#        devices:
+#            - /dev/ttyUSB0:/dev/ttyUSB0
+
