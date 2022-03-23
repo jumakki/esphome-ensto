@@ -54,14 +54,15 @@ Thermostat needs to be set to pairing mode for it to accept client connection fr
 
 # Integration to Home-assistant
 Add ESPHome integration to Home-assistant from **Configuration - Devices & Services**
+
 Esphome-ensto should be automatically discovered with 1 device and multiple entities.
 There is an example how to add sensor to Lovelace UI in *home-assistant/ui-lovelace.yaml* file. It will show reading and statuses from the thermostat in graphs.
 
 ## Automation example
-In this automation example we will use one external temperature sensor to measure a real room temperature and control the thermostat to keep the real room temperature within ±1°C of selected target temperature.
+In this automation example we will use one external temperature sensor to measure a real room temperature and control the thermostat to keep the real room temperature within ±1°C of selected target temperature. For that we use the Boost feature of the thermostat.
 
 First let's create adjustable target temperature value.
-Add following to configuration.yaml file of your home-assistant instance
+Add following to *configuration.yaml* file of your home-assistant instance
 
     input_number:
       ensto1_target_external_temperature:
@@ -72,7 +73,7 @@ Add following to configuration.yaml file of your home-assistant instance
         unit_of_measurement: '°C'
         icon: mdi:home-thermometer-outline
 
-Then add 2 dummy sensors for calculating differences
+Then add 2 dummy sensors for calculating temperature differences. First one calculates difference between room temperature from external sensor and target temperature. Second one calculates the value we need to send to the ESPHome for setting the boost.
 
     sensor:
       - platform: template
@@ -108,7 +109,9 @@ Then add 2 dummy sensors for calculating differences
 
 **Note:** Boost temperature and other values are sent to ESPHome using range 0-100, as esphome-ensto.yaml uses Fan control for setting them. Fan supports only percentage values between 0-100%. So the formula above converts temperature difference between -5.0 and 5.0 to values between 0 and 100. That is only caused by limitation in Fan control. Real values could be sent if some other control would be used, but at the moment I don't know how to do that and using Fan as a workaround is "good enough".
 
-Add new Gauge card to Home-assistant UI for controlling target temperature. Clicking the Gauge card will show a slider for changing the value.
+Home-assistant needs to be restarted after *configuration.yaml* has been modified. Restart button can be found from **Configuration - Settings - Server Controls** menu.
+
+Add new Gauge card to Home-assistant UI for controlling the target temperature. Clicking the Gauge card will show a slider for changing the value.
 
     type: gauge
     entity: input_number.ensto1_target_external_temperature
@@ -120,7 +123,7 @@ Add new Gauge card to Home-assistant UI for controlling target temperature. Clic
       red: 22
     needle: true
 
-Could also add temperature difference between real room temperature and the target temperature to a history graph.
+We can also add temperature difference between real room temperature and the target temperature to a history graph.
 
     type: history-graph
     entities:
@@ -133,7 +136,7 @@ Could also add temperature difference between real room temperature and the targ
     hours_to_show: 24
     refresh_interval: 0
 
-And target room temperature to a graph with other temperatures
+And the target room temperature to a graph with other temperatures
 
     type: history-graph
     entities:
@@ -148,7 +151,7 @@ And target room temperature to a graph with other temperatures
     hours_to_show: 24
     refresh_interval: 0
 
-Now we can add new automation. Here is copy-paste from my automation.yaml, but it should be inputted using the UI. 
+Now we can add new automation. Here is copy-paste from my automation.yaml, but it can be inputted using the UI. 
 
     - id: '1645461355693'
       alias: Set Ensto boost value
