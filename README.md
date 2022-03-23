@@ -50,3 +50,143 @@ Thermostat needs to be set to pairing mode for it to accept client connection fr
 1. Close official mobile App, as thermostat will allow only one connected client at the time. Connected client will block other clients from connecting. It is safest to restart the thermostat to make sure old connection doesn't exist anymore.
 2. Press bluetooth pairing button from the thermostat for few seconds until blue led starts to blink.  
 3. Power up ESP32. It will automatically detect that the thermostat is in pairing mode and it will save the pairing information permanently for future connecions. After that ESP32 will automatically reconnect when ever it, or the thermostat, is restarted.
+
+
+# Integration to Home-assistant
+Add ESPHome integration to Home-assistant from **Configuration - Devices & Services**
+Esphome-ensto should be automatically discovered with 1 device and multiple entities.
+There is an example how to add sensor to Lovelace UI in *home-assistant/ui-lovelace.yaml* file. It will show reading and statuses from the thermostat in graphs.
+
+## Automation example
+In this automation example we will use one external temperature sensor to measure a real room temperature and control the thermostat to keep the real room temperature within ±1°C of selected target temperature.
+
+First let's create adjustable target temperature value.
+Add following to configuration.yaml file of your home-assistant instance
+
+    input_number:
+      ensto1_target_external_temperature:
+        name: Target external temperature
+        min: 15
+        max: 26
+        step: 0.1
+        unit_of_measurement: '°C'
+        icon: mdi:home-thermometer-outline
+
+Then add 2 dummy sensors for calculating differences
+
+    sensor:
+      - platform: template
+        sensors:
+          ensto1_target_temperature_diff:
+            unit_of_measurement: '°C'
+            entity_id:
+              - sensor.bedroom_temperature
+            value_template: >-
+              {% set room = states('sensor.bedroom_temperature')|float %}
+              {% set target = states('input_number.ensto1_target_external_temperature')|float %}
+              {% if room == 0.0 %}
+                {{ 0 }}
+              {% else %}
+                {{ (room - target)|round(2) }}
+              {% endif %}
+    # Temperature difference between target temperature and real room temperature.
+    # Difference with limits -4.9..5.0 decrees is scaled to 1..100. Ready to be sent as fan
+    # speed percentage to ESPHome. ((val + 5) / 10 * 100)
+    # Zero value is handled as uninitialized condition in automation.
+          ensto1_temperature_boost_diff:
+            unit_of_measurement: '°C'
+            entity_id:
+              - sensor.bedroom_temperature
+            value_template: >-
+              {% set room = states('sensor.bedroom_temperature')|float %}
+              {% set target = states('input_number.ensto1_target_external_temperature')|float %}
+              {% if room == 0.0 %}
+                {{ 50 }}
+              {% else %}
+                {{ (max(-4.9, min((target - room)|round(2), 5)) + 5) * 10 }}
+              {% endif %}
+
+**Note:** Boost temperature and other values are sent to ESPHome using range 0-100, as esphome-ensto.yaml uses Fan control for setting them. Fan supports only percentage values between 0-100%. So the formula above converts temperature difference between -5.0 and 5.0 to values between 0 and 100. That is only caused by limitation in Fan control. Real values could be sent if some other control would be used, but at the moment I don't know how to do that and using Fan as a workaround is "good enough".
+
+Add new Gauge card to Home-assistant UI for controlling target temperature. Clicking the Gauge card will show a slider for changing the value.
+
+    type: gauge
+    entity: input_number.ensto1_target_external_temperature
+    min: 15
+    max: 26
+    severity:
+      green: 19
+      yellow: 15
+      red: 22
+    needle: true
+
+Could also add temperature difference between real room temperature and the target temperature to a history graph.
+
+    type: history-graph
+    entities:
+      - entity: sensor.ensto1_temperature_calibration_value
+        name: Calibration value
+      - entity: sensor.ensto1_target_temperature_diff
+        name: Target diff
+      - entity: sensor.ensto1_temperature_boost_offset
+        name: Boost offset
+    hours_to_show: 24
+    refresh_interval: 0
+
+And target room temperature to a graph with other temperatures
+
+    type: history-graph
+    entities:
+      - entity: sensor.ensto1_room_temperature
+        name: Temperature
+      - entity: sensor.ensto1_target_temperature
+        name: Target
+      - entity: sensor.bedroom_temperature
+        name: External
+      - entity: input_number.ensto1_target_external_temperature
+        name: External target
+    hours_to_show: 24
+    refresh_interval: 0
+
+Now we can add new automation. Here is copy-paste from my automation.yaml, but it should be inputted using the UI. 
+
+    - id: '1645461355693'
+      alias: Set Ensto boost value
+      description: ''
+      trigger:
+      - platform: state
+        entity_id: sensor.ensto1_target_temperature_diff
+      condition:
+      - condition: or
+        conditions:
+      - condition: numeric_state
+        entity_id: sensor.ensto1_target_temperature_diff
+        above: '1'
+      - condition: numeric_state
+        entity_id: sensor.ensto1_target_temperature_diff
+        below: '-1'
+      action:
+      - service: fan.set_percentage
+        data:
+          percentage: '{{ states.sensor.ensto1_temperature_boost_diff.state|int }}'
+        target:
+          entity_id: fan.ensto1_temperature_boost_offset_set
+      - delay:
+        hours: 0
+        minutes: 60
+        seconds: 0
+        milliseconds: 0
+      mode: single
+
+Above is "Single-mode" automation, meaning that only one instance of it is run at a time. The 60 minute delay at the end makes sure that automation is run only once per hour.  
+It uses State trigger for *sensor.ensto1_target_temperature_diff* value.  
+Condition for trigger is that Numeric state of the value is above 1 OR below -1. *Or* condition type must be added first and then 2 *Numeric state* conditions for above and below values.  
+Action uses following YAML (use edit in YAML)
+
+    service: fan.set_percentage
+    data:
+      percentage: '{{ states.sensor.ensto1_temperature_boost_diff.state|int }}'
+    target:
+      entity_id: fan.ensto1_temperature_boost_offset_set
+
+Second action is *Wait for time to pass* with 60 minutes as a value.
