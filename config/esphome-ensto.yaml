@@ -7,7 +7,7 @@ esphome:
 # Enable logging
 logger:
   logs:
-    esp32_ble_tracker: DEBUG
+    esp32_ble_tracker: INFO
 
 # Enable Home Assistant API
 api:
@@ -17,7 +17,6 @@ ota:
 wifi:
   ssid: !secret wifi_ssid
   password: !secret wifi_password
-  fast_connect: true
 
 captive_portal:
 # Add webserver on port 80
@@ -62,6 +61,18 @@ globals:
   - id: ensto1_is_pairing
     type: bool
     restore_value: no
+# internal state machine states: 
+# 0 = disconnected, don't try to read any characteristics
+# 1 = read factory reset ID while device is in pairing mode
+# 2 = write factory reset ID back to device. Write just received ID back during pairing or old one when not pairing.
+# 3 = connected, free to read characteristics
+  - id: ensto1_state
+    type: uint32_t
+    initial_value: '0' 
+# interval count to filter what characteristics to read on each interval
+  - id: ensto1_interval_count
+    type: uint32_t
+    initial_value: '0'
 
 ble_client:
   - mac_address: !secret ensto1_mac
@@ -69,79 +80,29 @@ ble_client:
     on_connect:
       then:
         - lambda: |-
-            ESP_LOGI("ble_client_lambda", "Connected to Ensto");
+            ESP_LOGI("ensto1 on_connect", "Connected to Ensto");
 
             esphome::ble_client::BLEClient* client = id(ensto1);
             esp_ble_set_encryption(client->remote_bda, ESP_BLE_SEC_ENCRYPT_MITM);
             if (id(ensto1_is_pairing)) {
-                return; // handle in below lambda
+                ESP_LOGI("ensto1 on_connect", "Connected to Ensto1 (pairing) -> read factory reset ID");
+                id(ensto1_state) = 1; // read new factory reset ID
+                return;
             }
             uint32_t key = id(ensto1_factory_reset_id);
             if (key == 0) {
-              ESP_LOGW("ble_client_lambda", "Factory reset ID is not set. Must be paired first.");
+              ESP_LOGW("ensto1 on_connect", "Factory reset ID is not set. Must be paired first.");
               return;
             }
-            uint8_t newVal[4] = {
-                (uint8_t)(key & 0xff),
-                (uint8_t)((key >> 8) & 0xff),
-                (uint8_t)((key >> 16) & 0xff),
-                (uint8_t)((key >> 24) & 0xff),
-            };
-            ESP_LOG_BUFFER_HEX("ble_client_lambda", newVal, sizeof(newVal));
-            ESP_LOGI("ble_client_lambda", "key = %02x%02x%02x%02x", newVal[0], newVal[1], newVal[2], newVal[3]);
-            int status = esp_ble_gattc_write_char(
-              client->gattc_if,
-              client->conn_id,
-              0x4a,
-              sizeof(newVal),
-              newVal,
-              ESP_GATT_WRITE_TYPE_RSP,
-              ESP_GATT_AUTH_REQ_NONE
-            );
-
-            if (status) {
-              ESP_LOGW("ble_client_lambda", "Error sending write value to Ensto1, status=%d", status);
-            } else {
-              ESP_LOGI("ble_client_lambda", "Ensto1 key written, status=%d", status);
-            }
-            id(ensto1_connection_state).publish_state(status == 0);
-
-        - delay: 5s
-        - lambda: |-
-            if (!id(ensto1_is_pairing)) {
-                if (id(ensto1_connection_state)) {
-                    // Ensto disconnects if some characteristic is not read for 30 seconds
-                    id(ensto1_real_time_indication_characteristic).set_update_interval(15000);
-                    id(ensto1_real_time_indication_characteristic).call_setup();
-                    id(ensto1_adaptive_temp_control_characteristic).set_update_interval(60000);
-                    id(ensto1_adaptive_temp_control_characteristic).call_setup();
-                    id(ensto1_temp_calibration_characteristic).set_update_interval(60000);
-                    id(ensto1_temp_calibration_characteristic).call_setup();
-                    id(ensto1_boost_characteristic).set_update_interval(60000);
-                    id(ensto1_boost_characteristic).call_setup();
-                }
-            } else {
-                // in pairing mode. Read factory reset ID
-                id(ensto1_security_key_characteristic).set_update_interval(5000);
-                id(ensto1_security_key_characteristic).call_setup();
-            }
+            ESP_LOGI("ensto1 on_connect", "Connected to Ensto1 -> write factory reset ID");
+            id(ensto1_state) = 2; // write old factory reset id
             
     on_disconnect:
       then:
         - lambda: |-
-            ESP_LOGI("ble_client_lambda", "Disconnected from Ensto1");
+            ESP_LOGI("ensto1 on_disconnect", "Disconnected from Ensto1");
             id(ensto1_connection_state).publish_state(false);
-            // stop updating
-            id(ensto1_security_key_characteristic).set_update_interval(-1);
-            id(ensto1_security_key_characteristic).call_setup();
-            id(ensto1_real_time_indication_characteristic).set_update_interval(-1);
-            id(ensto1_real_time_indication_characteristic).call_setup();
-            id(ensto1_adaptive_temp_control_characteristic).set_update_interval(-1);
-            id(ensto1_adaptive_temp_control_characteristic).call_setup();
-            id(ensto1_temp_calibration_characteristic).set_update_interval(-1);
-            id(ensto1_temp_calibration_characteristic).call_setup();
-            id(ensto1_boost_characteristic).set_update_interval(-1);
-            id(ensto1_boost_characteristic).call_setup();
+            id(ensto1_state) = 0; // disconnected
             
 binary_sensor:
   - platform: template
@@ -207,9 +168,9 @@ sensor:
           last_heating_mode = heating_mode;
           id(ensto1_heating_mode).publish_state(heating_mode);
       }
-
       is_first = false;
       return NAN;
+
   - platform: template
     name: "Ensto1 Target temperature"
     id: ensto1_target_temperature
@@ -346,41 +307,71 @@ sensor:
 
       uint32_t key = x[0] | x[1] << 8 | x[2] << 16 | x[3] << 24;
       if (key == 0) {
-          ESP_LOGW("ble_client.ensto1_pairing", "Reading Ensto1 factory reset ID failed");
+          ESP_LOGW("ensto1_pairing", "Reading Ensto1 factory reset ID failed");
           return NAN; // couldn't get pairing key
       }
-      uint8_t buf[] = {x[0], x[1], x[2], x[3]};
-      // write it back
-      esphome::ble_client::BLEClient* client = id(ensto1);
-      if (!client) return NAN;
-      int status = esp_ble_gattc_write_char(
-          client->gattc_if,
-          client->conn_id,
-          0x4a,
-          sizeof(buf),
-          buf,
-          ESP_GATT_WRITE_TYPE_RSP,
-          ESP_GATT_AUTH_REQ_NONE
-      );
-      
-      if (status != 0){
-          ESP_LOGW("ble_client.ensto1_pairing", "Writing Ensto1 key back failed, status=%d", status);
-          return NAN;
-      }
+      ESP_LOGI("ensto1_pairing", "key read = %02x%02x%02x%02x", x[0], x[1], x[2], x[3]);
       id(ensto1_factory_reset_id) = key;
-      id(ensto1_security_key_characteristic).set_update_interval(-1); // stop updating
-      id(ensto1_security_key_characteristic).call_setup();
-      id(ensto1_connection_state).publish_state(true);
-      // Ensto disconnects if some characteristic is not read for 30 seconds
-      id(ensto1_real_time_indication_characteristic).set_update_interval(15000);
-      id(ensto1_real_time_indication_characteristic).call_setup();
-      id(ensto1_adaptive_temp_control_characteristic).set_update_interval(60000);
-      id(ensto1_adaptive_temp_control_characteristic).call_setup();
-      id(ensto1_temp_calibration_characteristic).set_update_interval(60000);
-      id(ensto1_temp_calibration_characteristic).call_setup();
-      id(ensto1_boost_characteristic).set_update_interval(60000);
-      id(ensto1_boost_characteristic).call_setup();
+      ESP_LOGI("ensto1_pairing", "Factory reset ID read -> write factory reset ID");
+      id(ensto1_state) = 2; // write key back
       return NAN;
+
+# state machine loop. Do actions every 5 second
+interval:
+  - interval: 5s
+    then: 
+      - lambda: |-
+          id(ensto1_interval_count) = id(ensto1_interval_count) + 1;
+      # 1 = pairing, read factory reset ID
+      - if:
+          condition:
+            lambda: |-
+              return id(ensto1_state) == 1;
+          then:
+            - lambda: |-
+                id(ensto1_security_key_characteristic).update();
+      # 2 = write factory reset ID (if it is not zero)
+      - if:
+          condition:
+            lambda: |-
+              uint32_t key = id(ensto1_factory_reset_id);
+              return id(ensto1_state) == 2 && key != 0;
+          then:
+            - ble_client.ble_write:
+                id: ensto1
+                service_uuid: F49CEFD5-209B-4531-99BD-89FE2909931A
+                characteristic_uuid: f366dddb-ebe2-43ee-83c0-472ded74c8fa
+                value: !lambda |-
+                    uint32_t key = id(ensto1_factory_reset_id);
+                    uint8_t newVal[4] = {
+                        (uint8_t)(key & 0xff),
+                        (uint8_t)((key >> 8) & 0xff),
+                        (uint8_t)((key >> 16) & 0xff),
+                        (uint8_t)((key >> 24) & 0xff),
+                    };
+                    ESP_LOGI("ensto1 write key", "%02x%02x%02x%02x", newVal[0], newVal[1], newVal[2], newVal[3]);
+                    ESP_LOGI("ensto1 write key", "Factory reset ID written -> Connected");
+                    id(ensto1_connection_state).publish_state(true);
+                    id(ensto1_state) = 3; // connected
+                    return {newVal[0], newVal[1], newVal[2], newVal[3]};
+          else:
+      # 3 = connected, read characteristics once in a while
+            - if:
+                condition:
+                  lambda: |-
+                      return id(ensto1_state) == 3;
+                then:
+                  - lambda: |-
+                      // Ensto disconnects if some characteristic is not read for 30 seconds
+                      if (id(ensto1_interval_count) % 2 == 0) { // every 10 seconds
+                          id(ensto1_real_time_indication_characteristic).update();
+                      }
+                      if (id(ensto1_interval_count) % 6 == 0) { // every 30 seconds
+                          id(ensto1_adaptive_temp_control_characteristic).update();
+                          id(ensto1_temp_calibration_characteristic).update();
+                          id(ensto1_boost_characteristic).update();
+                      }
+          
 
 # There might be easier way to do this.
 # Taking calibration value as fan speed percentage (float: 0.1..1.0).
@@ -393,38 +384,22 @@ output:
     write_action:
       - if:
           condition:
-            lambda: return true;
+            lambda: |-
+                // skip uninitialized zero value from Home-assistant when it is restarted etc.
+                return id(ensto1_connection_state) && state >= 0.01f;
           then:
-            - lambda: |-
-                if (!id(ensto1_connection_state)) {
-                    return;
-                }
-                if (state < 0.01f) {
-                    return; // skip uninitialized zero value from Home-assistant when it is restarted etc.
-                }
-                esphome::ble_client::BLEClient* client = id(ensto1);
-                if (!client) {
-                    ESP_LOGW("ble_client.write_action", "Ensto1 BLE Client doesn't exist");
-                    return;
-                }
-                // convert state from 0.1..1 to -49..50
-                int16_t value = (int16_t)((state * 10.0f - 5.0f) * 10 + 0.5f);
-                // ensure it is within limits
-                value = std::max(int16_t(-50), std::min(value, int16_t(50)));
-                ESP_LOGI("ble_client.write_action", "New calibration value set to %d", value);
-                uint8_t buf[] = {(uint8_t)(value & 0xff), (uint8_t)((value >> 8) & 0xff)};
-                int status = esp_ble_gattc_write_char(
-                    client->gattc_if,
-                    client->conn_id,
-                    0x39, //characteristic: 1eca4351-b264-4db6-9c59-af4341d6ce69
-                    sizeof(buf),
-                    buf,
-                    ESP_GATT_WRITE_TYPE_RSP,
-                    ESP_GATT_AUTH_REQ_NONE
-                );
-                if (status != 0) {
-                    ESP_LOGW("ble_client_lambda", "Writing Ensto1 calibration value %d failed, status=%d", value, status);
-                }
+            - ble_client.ble_write:
+                id: ensto1
+                service_uuid: F49CEFD5-209B-4531-99BD-89FE2909931A
+                characteristic_uuid: 1eca4351-b264-4db6-9c59-af4341d6ce69
+                value: !lambda |-
+                    // convert state from 0.1..1 to -49..50
+                    int16_t value = (int16_t)((state * 10.0f - 5.0f) * 10 + 0.5f);
+                    // ensure it is within limits
+                    value = std::max(int16_t(-50), std::min(value, int16_t(50)));
+                    ESP_LOGI("ble_client.write_action", "New calibration value set to %d", value);
+                    return {(uint8_t)(value & 0xff), (uint8_t)((value >> 8) & 0xff)};
+
 # Temperature boost offset written to Ensto just like calibration value, except using range -490..500.
 # Device would accept full int16_t range, but using Fan limits us to 99 values (when excluding zero)
   - platform: template
@@ -433,42 +408,25 @@ output:
     write_action:
       - if:
           condition:
-            lambda: return true;
+            lambda: |-
+                // skip uninitialized zero value from Home-assistant when it is restarted etc.
+                return id(ensto1_connection_state) && state >= 0.01f;
           then:
-            - lambda: |-
-                if (!id(ensto1_connection_state)) {
-                    return;
-                }
-                if (state < 0.01f) {
-                    return; // skip uninitialized zero value from Home-assistant when it is restarted etc.
-                }
-                esphome::ble_client::BLEClient* client = id(ensto1);
-                if (!client) {
-                    ESP_LOGW("ble_client.write_action", "Ensto1 BLE Client doesn't exist");
-                    return;
-                }
-                // convert state from 0.1..1 to -490..500
-                int16_t value = (int16_t)((state * 10.0f - 5.0f) * 100 + 0.5f);
-                uint16_t minutes = 60; // hard-coded boost length
-                ESP_LOGI("ble_client.write_action", "New boost offset set to %d for %u minutes", value, minutes);
-                uint8_t buf[] = {
-                    1, // enable
-                    (uint8_t)(value & 0xff), (uint8_t)((value >> 8) & 0xff), // int16_t offset
-                    0, // boost offset percentage (not used)
-                    (uint8_t)(minutes & 0xff), (uint8_t)((minutes >> 8) & 0xff) // uint16_t boost time set point in minutes
-                };
-                int status = esp_ble_gattc_write_char(
-                    client->gattc_if,
-                    client->conn_id,
-                    0x29, //characteristic: ca3c0685-b708-4cd4-a049-5badd10469e7
-                    sizeof(buf),
-                    buf,
-                    ESP_GATT_WRITE_TYPE_RSP,
-                    ESP_GATT_AUTH_REQ_NONE
-                );
-                if (status != 0) {
-                    ESP_LOGW("ble_client_lambda", "Writing Ensto1 boost offset %d failed, status=%d", value, status);
-                }
+            - ble_client.ble_write:
+                id: ensto1
+                service_uuid: F49CEFD5-209B-4531-99BD-89FE2909931A
+                characteristic_uuid: ca3c0685-b708-4cd4-a049-5badd10469e7
+                value: !lambda |-
+                    // convert state from 0.1..1 to -490..500
+                    int16_t value = (int16_t)((state * 10.0f - 5.0f) * 100 + 0.5f);
+                    uint16_t minutes = 60; // hard-coded boost length
+                    ESP_LOGI("ble_client.write_action", "New boost offset set to %d for %u minutes", value, minutes);
+                    return {
+                        1, // enable
+                        (uint8_t)(value & 0xff), (uint8_t)((value >> 8) & 0xff), // int16_t offset
+                        0, // boost offset percentage (not used)
+                        (uint8_t)(minutes & 0xff), (uint8_t)((minutes >> 8) & 0xff) // uint16_t boost time set point in minutes
+                    };
 
 fan:
   - platform: speed
