@@ -74,7 +74,7 @@ Add following to *configuration.yaml* file of your home-assistant instance
         unit_of_measurement: '°C'
         icon: mdi:home-thermometer-outline
 
-Then add 2 dummy sensors for calculating temperature differences. First one calculates difference between room temperature from external sensor and target temperature. Second one calculates the value we need to send to the ESPHome for setting the boost.
+Then add a dummy sensor for calculating temperature difference. It calculates difference between room temperature from external sensor (*sensor.bedroom_temperature*) and target temperature.
 
     sensor:
       - platform: template
@@ -91,24 +91,6 @@ Then add 2 dummy sensors for calculating temperature differences. First one calc
               {% else %}
                 {{ (room - target)|round(2) }}
               {% endif %}
-    # Temperature difference between target temperature and real room temperature.
-    # Difference with limits -4.9..5.0 decrees is scaled to 1..100. Ready to be sent as fan
-    # speed percentage to ESPHome. ((val + 5) / 10 * 100)
-    # Zero value is handled as uninitialized condition in automation.
-          ensto1_temperature_boost_diff:
-            unit_of_measurement: '°C'
-            entity_id:
-              - sensor.bedroom_temperature
-            value_template: >-
-              {% set room = states('sensor.bedroom_temperature')|float %}
-              {% set target = states('input_number.ensto1_target_external_temperature')|float %}
-              {% if room == 0.0 %}
-                {{ 50 }}
-              {% else %}
-                {{ (max(-4.9, min((target - room)|round(2), 5)) + 5) * 10 }}
-              {% endif %}
-
-**Note:** Boost temperature and other values are sent to ESPHome using range 0-100, as esphome-ensto.yaml uses Fan control for setting them. Fan supports only percentage values between 0-100%. So the formula above converts temperature difference between -5.0 and 5.0 to values between 0 and 100. That is only caused by limitation in Fan control. Real values could be sent if some other control would be used, but at the moment I don't know how to do that and using Fan as a workaround is "good enough".
 
 Home-assistant needs to be restarted after *configuration.yaml* has been modified. Restart button can be found from **Configuration - Settings - Server Controls** menu.
 
@@ -163,23 +145,22 @@ Now we can add new automation. Here is copy-paste from my automation.yaml, but i
       condition:
       - condition: or
         conditions:
-      - condition: numeric_state
-        entity_id: sensor.ensto1_target_temperature_diff
-        above: '1'
-      - condition: numeric_state
-        entity_id: sensor.ensto1_target_temperature_diff
-        below: '-1'
+          - condition: numeric_state
+            entity_id: sensor.ensto1_target_temperature_diff
+            above: '1'
+          - condition: numeric_state
+            entity_id: sensor.ensto1_target_temperature_diff
+            below: '-1'
       action:
-      - service: fan.set_percentage
-        data:
-          percentage: '{{ states.sensor.ensto1_temperature_boost_diff.state|int }}'
-        target:
-          entity_id: fan.ensto1_temperature_boost_offset_set
+      - service: esphome.esphome_ensto_set_ensto1_temperature_boost_offset
+        data_template:
+          boost_offset: "{{ -1 * states.sensor.ensto1_target_temperature_diff.state | float }}"
+          length_minutes: "{{ 60 }}"
       - delay:
-        hours: 0
-        minutes: 60
-        seconds: 0
-        milliseconds: 0
+          hours: 0
+          minutes: 60
+          seconds: 0
+          milliseconds: 0
       mode: single
 
 Above is "Single-mode" automation, meaning that only one instance of it is run at a time. The 60 minute delay at the end makes sure that automation is run only once per hour.  
@@ -187,10 +168,39 @@ It uses State trigger for *sensor.ensto1_target_temperature_diff* value.
 Condition for trigger is that Numeric state of the value is above 1 OR below -1. *Or* condition type must be added first and then 2 *Numeric state* conditions for above and below values.  
 Action uses following YAML (use edit in YAML)
 
-    service: fan.set_percentage
-    data:
-      percentage: '{{ states.sensor.ensto1_temperature_boost_diff.state|int }}'
-    target:
-      entity_id: fan.ensto1_temperature_boost_offset_set
+    service: esphome.esphome_ensto_set_ensto1_temperature_boost_offset
+    data_template:
+      boost_offset: "{{ -1 * states.sensor.ensto1_target_temperature_diff.state | float }}"
+      length_minutes: "{{ 60 }}"
 
 Second action is *Wait for time to pass* with 60 minutes as a value.
+
+
+Setting calibration value from Home Assistant UI can be done by adding another input_number for it
+
+    ensto1_temperature_calibration_value:
+      name: Temperature calibration value
+      min: -5
+      max: 5
+      step: 0.1
+      unit_of_measurement: '°C'
+      icon: mdi:home-thermometer-outline
+
+Then add Gauge card to UI just like for target temperature above, but with value ranges from -5 to 5.
+
+Then add automation using following values:
+
+    Alias: Send Ensto temperature calibration value
+    description: ""
+    trigger:
+      - platform: state
+        entity_id:
+          - input_number.ensto1_temperature_calibration_value
+    condition: []
+    action:
+      - service: esphome.esphome_ensto_set_ensto1_temperature_calibration
+        data:
+          temperature_offset: >-
+            {{ states.input_number.ensto1_temperature_calibration_value.state |
+            float }}
+    mode: single
