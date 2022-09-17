@@ -9,9 +9,6 @@ logger:
   logs:
     esp32_ble_tracker: INFO
 
-# Enable Home Assistant API
-api:
-
 ota:
 
 wifi:
@@ -19,9 +16,10 @@ wifi:
   password: !secret wifi_password
 
 captive_portal:
+
 # Add webserver on port 80
-web_server:
-  port: 80
+#web_server:
+#  port: 80
 
 esp32_ble_tracker:
   scan_parameters: 
@@ -354,84 +352,71 @@ interval:
                     id(ensto1_connection_state).publish_state(true);
                     id(ensto1_state) = 3; // connected
                     return {newVal[0], newVal[1], newVal[2], newVal[3]};
-          else:
       # 3 = connected, read characteristics once in a while
-            - if:
-                condition:
-                  lambda: |-
-                      return id(ensto1_state) == 3;
-                then:
-                  - lambda: |-
-                      // Ensto disconnects if some characteristic is not read for 30 seconds
-                      if (id(ensto1_interval_count) % 2 == 0) { // every 10 seconds
-                          id(ensto1_real_time_indication_characteristic).update();
-                      }
-                      if (id(ensto1_interval_count) % 6 == 0) { // every 30 seconds
-                          id(ensto1_adaptive_temp_control_characteristic).update();
-                          id(ensto1_temp_calibration_characteristic).update();
-                          id(ensto1_boost_characteristic).update();
-                      }
+      - if:
+          condition:
+            lambda: |-
+                return id(ensto1_state) == 3;
+          then:
+            - lambda: |-
+                // Ensto disconnects if some characteristic is not read for 30 seconds
+                if (id(ensto1_interval_count) % 2 == 0) { // every 10 seconds
+                    id(ensto1_real_time_indication_characteristic).update();
+                }
+                if (id(ensto1_interval_count) % 6 == 0) { // every 30 seconds
+                    id(ensto1_adaptive_temp_control_characteristic).update();
+                    id(ensto1_temp_calibration_characteristic).update();
+                    id(ensto1_boost_characteristic).update();
+                }
           
 
-# There might be easier way to do this.
-# Taking calibration value as fan speed percentage (float: 0.1..1.0).
-# Zero value is handled as uninitialized and not written.
-# Scaling 0.1..1.0 to temperature value -4.9..5.0 which is written as -49..50 to Ensto.
-output:
-  - platform: template
-    id: ensto1_temperature_calibration_set
-    type: float
-    write_action:
-      - if:
-          condition:
-            lambda: |-
-                // skip uninitialized zero value from Home-assistant when it is restarted etc.
-                return id(ensto1_connection_state) && state >= 0.01f;
-          then:
-            - ble_client.ble_write:
-                id: ensto1
-                service_uuid: F49CEFD5-209B-4531-99BD-89FE2909931A
-                characteristic_uuid: 1eca4351-b264-4db6-9c59-af4341d6ce69
-                value: !lambda |-
-                    // convert state from 0.1..1 to -49..50
-                    int16_t value = (int16_t)((state * 10.0f - 5.0f) * 10 + 0.5f);
-                    // ensure it is within limits
-                    value = std::max(int16_t(-50), std::min(value, int16_t(50)));
-                    ESP_LOGI("ble_client.write_action", "New calibration value set to %d", value);
-                    return {(uint8_t)(value & 0xff), (uint8_t)((value >> 8) & 0xff)};
-
-# Temperature boost offset written to Ensto just like calibration value, except using range -490..500.
-# Device would accept full int16_t range, but using Fan limits us to 99 values (when excluding zero)
-  - platform: template
-    id: ensto1_temperature_boost_offset_set
-    type: float
-    write_action:
-      - if:
-          condition:
-            lambda: |-
-                // skip uninitialized zero value from Home-assistant when it is restarted etc.
-                return id(ensto1_connection_state) && state >= 0.01f;
-          then:
-            - ble_client.ble_write:
-                id: ensto1
-                service_uuid: F49CEFD5-209B-4531-99BD-89FE2909931A
-                characteristic_uuid: ca3c0685-b708-4cd4-a049-5badd10469e7
-                value: !lambda |-
-                    // convert state from 0.1..1 to -490..500
-                    int16_t value = (int16_t)((state * 10.0f - 5.0f) * 100 + 0.5f);
-                    uint16_t minutes = 60; // hard-coded boost length
-                    ESP_LOGI("ble_client.write_action", "New boost offset set to %d for %u minutes", value, minutes);
-                    return {
-                        1, // enable
-                        (uint8_t)(value & 0xff), (uint8_t)((value >> 8) & 0xff), // int16_t offset
-                        0, // boost offset percentage (not used)
-                        (uint8_t)(minutes & 0xff), (uint8_t)((minutes >> 8) & 0xff) // uint16_t boost time set point in minutes
-                    };
-
-fan:
-  - platform: speed
-    output: ensto1_temperature_calibration_set
-    name: "Ensto1 temperature calibration set"
-  - platform: speed
-    output: ensto1_temperature_boost_offset_set
-    name: "Ensto1 temperature boost offset set"
+# Enable Home Assistant API
+api:
+  services:
+# Temperature calibration value has range of -5.0..5.0C written as -50..50 to Ensto.
+    - service: set_ensto1_temperature_calibration
+      variables:
+        temperature_offset: float
+      then:
+        - if:
+            condition:
+              lambda: |-
+                  return id(ensto1_connection_state);
+            then:
+              - ble_client.ble_write:
+                  id: ensto1
+                  service_uuid: F49CEFD5-209B-4531-99BD-89FE2909931A
+                  characteristic_uuid: 1eca4351-b264-4db6-9c59-af4341d6ce69
+                  value: !lambda |-
+                      int16_t value = std::round(temperature_offset * 10);
+                      // ensure it is within limits
+                      value = std::max<int16_t>(-50, std::min<int16_t>(value, 50));
+                      ESP_LOGI("ble_client.write_action", "New calibration value set to %d", value);
+                      return {(uint8_t)(value & 0xff), (uint8_t)((value >> 8) & 0xff)};
+# Temperature boost offset has valid range of -20.0..20.0C written as -2000..2000 to Ensto
+# Boost length is given as minutes. According to specification the value is uint8_t, so valid range is 0..255.
+    - service: set_ensto1_temperature_boost_offset
+      variables:
+        boost_offset: float
+        length_minutes: int
+      then:
+        - if:
+            condition:
+              lambda: |-
+                  return id(ensto1_connection_state);
+            then:
+              - ble_client.ble_write:
+                  id: ensto1
+                  service_uuid: F49CEFD5-209B-4531-99BD-89FE2909931A
+                  characteristic_uuid: ca3c0685-b708-4cd4-a049-5badd10469e7
+                  value: !lambda |-
+                      int16_t value = std::round(boost_offset * 100);
+                      value = std::max<int16_t>(-2000, std::min<int16_t>(value, 2000));
+                      uint16_t minutes = std::max(0, std::min(length_minutes, 255));
+                      ESP_LOGI("ble_client.write_action", "New boost offset set to %d for %u minutes", value, minutes);
+                      return {
+                          1, // enable
+                          (uint8_t)(value & 0xff), (uint8_t)((value >> 8) & 0xff), // int16_t offset
+                          0, // boost offset percentage (not used)
+                          (uint8_t)(minutes & 0xff), (uint8_t)((minutes >> 8) & 0xff) // uint16_t boost time set point in minutes
+                      };
