@@ -291,6 +291,151 @@ sensor:
     id: ensto1_temp_boost_minutes_left
     unit_of_measurement: "minutes"
 
+# Power consumption
+  - platform: ble_client
+    ble_client_id: ensto1
+    id: ensto1_power_consumption_characteristic
+    internal: true
+    service_uuid: F49CEFD5-209B-4531-99BD-89FE2909931A
+    characteristic_uuid: c1686f28-fa1b-4791-9eca-35523fb3597e
+    notify: false
+    update_interval: never
+    lambda: |-
+      // format (uint8_t): <header><current hour><current date><current month><current year> following 25x(<hour delta from current><consumption ratio>)
+      // ESP_LOGI("ble_client.receive", "Power consumption characteristic received with %d bytes: %s", x.size(), format_hex(x.data(), x.size()).c_str());
+      if (x.size() < 9) return NAN;
+      uint32_t power = id(ensto1_max_heating_power).get_state();
+      auto price = id(ensto1_price_per_kwh).get_state();
+      if (x[5] == 0) { // current hour (consumption so far)
+          id(ensto1_power_consumption_ratio_current_hour).publish_state(x[6]);
+          id(ensto1_power_consumption_current_hour).publish_state(x[6] * power / 1000.0 / 100.0);
+          id(ensto1_price_current_hour).publish_state(x[6] * power / 1000.0 / 100.0 * price);
+      }
+      if (x[7] == 1) { // previous hour
+          id(ensto1_power_consumption_ratio_previous_hour).publish_state(x[8]);
+          id(ensto1_power_consumption_previous_hour).publish_state(x[8] * power / 1000.0 / 100.0);
+          id(ensto1_price_previous_hour).publish_state(x[8] * power / 1000.0 / 100.0 * price);
+      }
+      return NAN;
+  - platform: template
+    name: "Ensto1 Power consumption ratio current hour"
+    id: ensto1_power_consumption_ratio_current_hour
+    accuracy_decimals: 0
+    unit_of_measurement: "%"
+  - platform: template
+    name: "Ensto1 Power consumption ratio previous hour"
+    id: ensto1_power_consumption_ratio_previous_hour
+    accuracy_decimals: 0
+    unit_of_measurement: "%"
+  - platform: template
+    name: "Ensto1 Power consumption current hour (kWh)"
+    id: ensto1_power_consumption_current_hour
+    accuracy_decimals: 3
+    unit_of_measurement: "kWh"
+  - platform: template
+    name: "Ensto1 Power consumption previous hour (kWh)"
+    id: ensto1_power_consumption_previous_hour
+    accuracy_decimals: 3
+    unit_of_measurement: "kWh"
+  - platform: template
+    name: "Ensto1 Electricity price current hour"
+    id: ensto1_price_current_hour
+    accuracy_decimals: 5
+    unit_of_measurement: "€" # hard-coded unit
+  - platform: template
+    name: "Ensto1 Electricity price previous hour"
+    id: ensto1_price_previous_hour
+    accuracy_decimals: 5
+    unit_of_measurement: "€" # hard-coded unit
+
+# Max heating power (set manually from App)
+  - platform: ble_client
+    ble_client_id: ensto1
+    id: ensto1_heating_power_characteristic
+    internal: true
+    service_uuid: F49CEFD5-209B-4531-99BD-89FE2909931A
+    characteristic_uuid: 53b7bf87-6cf0-4790-839a-e72d3afbec44
+    notify: false
+    update_interval: never
+    lambda: |-
+      // format (all single byte): <header><current hour><current date><current month><current year> following 25x(<hour delta from current><consumption ratio>)
+      ESP_LOGI("ble_client.receive", "Heating Power characteristic received with %d bytes: %s", x.size(), format_hex(x.data(), x.size()).c_str());
+      if (x.size() < 2) return NAN;
+      id(ensto1_max_heating_power).publish_state((int16_t)(256 * x[1] + x[0]));
+      return NAN;
+  - platform: template
+    name: "Ensto1 Max Heating Power"
+    id: ensto1_max_heating_power
+    accuracy_decimals: 0
+    unit_of_measurement: "W"
+
+# LED brightness
+  - platform: ble_client
+    ble_client_id: ensto1
+    id: ensto1_led_brightness_characteristic
+    internal: true
+    service_uuid: F49CEFD5-209B-4531-99BD-89FE2909931A
+    characteristic_uuid: 0bee30ff-ed95-4747-bf1b-01a60f5ff4fc
+    notify: false
+    update_interval: never
+    lambda: |-
+      if (x.size() < 3) return NAN;
+      auto red = x[0];
+      auto green = x[1];
+      auto blue = x[2];
+      ESP_LOGI("ble_client.receive", "LED brightness characteristic received: red=%d, green=%d, blue=%d", red, green, blue);
+      id(ensto1_red_led_brightness).publish_state(red);
+      id(ensto1_green_led_brightness).publish_state(green);
+      id(ensto1_blue_led_brightness).publish_state(blue);
+      return NAN;
+  - platform: template
+    name: "Ensto1 Red LED brightness"
+    id: ensto1_red_led_brightness
+    accuracy_decimals: 0
+    unit_of_measurement: "%"
+  - platform: template
+    name: "Ensto1 Green LED brightness"
+    id: ensto1_green_led_brightness
+    accuracy_decimals: 0
+    unit_of_measurement: "%"
+  - platform: template
+    name: "Ensto1 Blue LED brightness"
+    id: ensto1_blue_led_brightness
+    accuracy_decimals: 0
+    unit_of_measurement: "%"
+
+# Energy unit price (set manually from App)
+  - platform: ble_client
+    ble_client_id: ensto1
+    id: ensto1_energy_unit_characteristic
+    internal: true
+    service_uuid: F49CEFD5-209B-4531-99BD-89FE2909931A
+    characteristic_uuid: ccf1fe7b-d928-45b1-abba-7a915f2f0c64
+    notify: false
+    update_interval: never
+    lambda: |-
+      if (x.size() < 4) return NAN;
+      auto currency = x[0];
+      auto price = (int16_t)(256 * x[3] + x[2]) / 100.0f;
+      std::string currency_str;
+      if (currency == 1) currency_str = "€";
+      if (currency == 2) currency_str = "SEK";
+      if (currency == 3) currency_str = "NOK";
+      if (currency == 4) currency_str = "RUB";
+      if (currency == 5) currency_str = "$";
+      ESP_LOGI("ble_client.receive", "Energy unit characteristic received: currency=%d (%s), price=%f", currency, currency_str.c_str(), price);
+      id(ensto1_currency_id).publish_state(currency);
+      id(ensto1_price_per_kwh).publish_state(price);
+      return NAN;
+  - platform: template
+    name: "Ensto1 Currency ID"
+    id: ensto1_currency_id
+    accuracy_decimals: 0
+  - platform: template
+    name: "Ensto1 Price per kWh"
+    id: ensto1_price_per_kwh
+    accuracy_decimals: 2
+
 # Factory reset ID
   - platform: ble_client
     ble_client_id: ensto1
@@ -367,6 +512,10 @@ interval:
                     id(ensto1_adaptive_temp_control_characteristic).update();
                     id(ensto1_temp_calibration_characteristic).update();
                     id(ensto1_boost_characteristic).update();
+                    id(ensto1_heating_power_characteristic).update();                    
+                    id(ensto1_power_consumption_characteristic).update();
+                    id(ensto1_energy_unit_characteristic).update();
+                    id(ensto1_led_brightness_characteristic).update();
                 }
           
 
@@ -420,3 +569,64 @@ api:
                           0, // boost offset percentage (not used)
                           (uint8_t)(minutes & 0xff), (uint8_t)((minutes >> 8) & 0xff) // uint16_t boost time set point in minutes
                       };
+# Max heating power of the device (e.g. 1000W).
+    - service: set_ensto1_max_power
+      variables:
+        max_power: int
+      then:
+        - if:
+            condition:
+              lambda: |-
+                  return id(ensto1_connection_state);
+            then:
+              - ble_client.ble_write:
+                  id: ensto1
+                  service_uuid: F49CEFD5-209B-4531-99BD-89FE2909931A
+                  characteristic_uuid: 53b7bf87-6cf0-4790-839a-e72d3afbec44
+                  value: !lambda |-
+                      // ensure it is within limits
+                      uint16_t value = std::max<int32_t>(0, std::min<int32_t>(max_power, std::numeric_limits<uint16_t>::max()));
+                      ESP_LOGI("ble_client.write_action", "New max heating power value set to %d", value);
+                      return {(uint8_t)(value & 0xff), (uint8_t)((value >> 8) & 0xff)};
+# Price of electricity per kWh (e.g. 0.09€). Energy unit IDs: use_previous=0, EUR=1, SEK=2, NOK=3, RUB=4, USD=5
+    - service: set_ensto1_kwh_price
+      variables:
+        energy_unit_id: int
+        price_per_kwh: float
+      then:
+        - if:
+            condition:
+              lambda: |-
+                  return id(ensto1_connection_state) && (energy_unit_id >= 0 && energy_unit_id <= 5);
+            then:
+              - ble_client.ble_write:
+                  id: ensto1
+                  service_uuid: F49CEFD5-209B-4531-99BD-89FE2909931A
+                  characteristic_uuid: ccf1fe7b-d928-45b1-abba-7a915f2f0c64
+                  value: !lambda |-
+                      auto unit_id = energy_unit_id;
+                      if (unit_id == 0) unit_id = id(ensto1_currency_id).get_state();
+                      uint16_t value = std::max<uint16_t>(0, std::min<uint16_t>(price_per_kwh * 100, std::numeric_limits<uint16_t>::max()));
+                      ESP_LOGI("ble_client.write_action", "New price of electricity per kWh set to %f (unit ID=%d)", price_per_kwh, unit_id);
+                      return {(uint8_t)(unit_id & 0xff), 0, (uint8_t)(value & 0xff), (uint8_t)((value >> 8) & 0xff)};
+# Led brightness percentage (0-100)
+    - service: set_ensto1_led_brightness_percentage
+      variables:
+        red: int
+        green: int
+        blue: int
+      then:
+        - if:
+            condition:
+              lambda: |-
+                  return id(ensto1_connection_state);
+            then:
+              - ble_client.ble_write:
+                  id: ensto1
+                  service_uuid: F49CEFD5-209B-4531-99BD-89FE2909931A
+                  characteristic_uuid: 0bee30ff-ed95-4747-bf1b-01a60f5ff4fc
+                  value: !lambda |-
+                      ESP_LOGI("ble_client.write_action", "New LED brightness values set to: red=%d, green=%d, blue=%d", red, green, blue);
+                      return {(uint8_t)(std::max(0, std::min(red, 100)) & 0xff), 
+                              (uint8_t)(std::max(0, std::min(green, 100)) & 0xff),
+                              (uint8_t)(std::max(0, std::min(blue, 100)) & 0xff)};
