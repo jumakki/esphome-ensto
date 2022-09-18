@@ -322,31 +322,41 @@ sensor:
     id: ensto1_power_consumption_ratio_current_hour
     accuracy_decimals: 0
     unit_of_measurement: "%"
+    device_class: power_factor
+    state_class: total_increasing
   - platform: template
     name: "Ensto1 Power consumption ratio previous hour"
     id: ensto1_power_consumption_ratio_previous_hour
     accuracy_decimals: 0
     unit_of_measurement: "%"
+    device_class: power_factor
+    state_class: total
   - platform: template
     name: "Ensto1 Power consumption current hour (kWh)"
     id: ensto1_power_consumption_current_hour
     accuracy_decimals: 3
     unit_of_measurement: "kWh"
+    device_class: energy
+    state_class: total_increasing
   - platform: template
     name: "Ensto1 Power consumption previous hour (kWh)"
     id: ensto1_power_consumption_previous_hour
     accuracy_decimals: 3
     unit_of_measurement: "kWh"
+    device_class: energy
+    state_class: total
   - platform: template
     name: "Ensto1 Electricity price current hour"
     id: ensto1_price_current_hour
     accuracy_decimals: 5
     unit_of_measurement: "€" # hard-coded unit
+    state_class: total_increasing
   - platform: template
     name: "Ensto1 Electricity price previous hour"
     id: ensto1_price_previous_hour
     accuracy_decimals: 5
     unit_of_measurement: "€" # hard-coded unit
+    state_class: total
 
 # Max heating power (set manually from App)
   - platform: ble_client
@@ -367,6 +377,7 @@ sensor:
     name: "Ensto1 Max Heating Power"
     id: ensto1_max_heating_power
     accuracy_decimals: 0
+    device_class: power
     unit_of_measurement: "W"
 
 # LED brightness
