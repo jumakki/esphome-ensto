@@ -81,7 +81,7 @@ ble_client:
             ESP_LOGI("ensto1 on_connect", "Connected to Ensto");
 
             esphome::ble_client::BLEClient* client = id(ensto1);
-            esp_ble_set_encryption(client->remote_bda, ESP_BLE_SEC_ENCRYPT_MITM);
+            esp_ble_set_encryption(client->get_remote_bda(), ESP_BLE_SEC_ENCRYPT_MITM);
             if (id(ensto1_is_pairing)) {
                 ESP_LOGI("ensto1 on_connect", "Connected to Ensto1 (pairing) -> read factory reset ID");
                 id(ensto1_state) = 1; // read new factory reset ID
@@ -548,7 +548,7 @@ api:
                   service_uuid: F49CEFD5-209B-4531-99BD-89FE2909931A
                   characteristic_uuid: 1eca4351-b264-4db6-9c59-af4341d6ce69
                   value: !lambda |-
-                      int16_t value = std::round(temperature_offset * 10);
+                      int16_t value = round(temperature_offset * 10);
                       // ensure it is within limits
                       value = std::max<int16_t>(-50, std::min<int16_t>(value, 50));
                       ESP_LOGI("ble_client.write_action", "New calibration value set to %d", value);
@@ -570,7 +570,7 @@ api:
                   service_uuid: F49CEFD5-209B-4531-99BD-89FE2909931A
                   characteristic_uuid: ca3c0685-b708-4cd4-a049-5badd10469e7
                   value: !lambda |-
-                      int16_t value = std::round(boost_offset * 100);
+                      int16_t value = round(boost_offset * 100);
                       value = std::max<int16_t>(-2000, std::min<int16_t>(value, 2000));
                       uint16_t minutes = std::max(0, std::min(length_minutes, 255));
                       ESP_LOGI("ble_client.write_action", "New boost offset set to %d for %u minutes", value, minutes);
