@@ -1,6 +1,6 @@
 # esphome-ensto
 YAML only implementation of Ensto thermostat support for ESPHome.  
-Requires ESPHome 2022.9.3 or later.
+Requires ESPHome 2022.8.0 or later.
 
 # Installation
 ## Docker-compose
@@ -52,6 +52,8 @@ Thermostat needs to be set to pairing mode for it to accept client connection fr
 2. Press bluetooth pairing button from the thermostat for few seconds until blue led starts to blink.  
 3. Power up ESP32. It will automatically detect that the thermostat is in pairing mode and it will save the pairing information permanently for future connecions. After that ESP32 will automatically reconnect when ever it, or the thermostat, is restarted.
 
+It is recommended to adjust device's own temperature setting so that it is close to wanted temperature. That way any failure in Home Assistant, WiFi, ESP32, bluetooth or this code can be mitigated by turning the ESP32 off. Boost offsets used to control the thermostat have reasonable timeouts to give control back to the thermostat within about 30 minutes.
+
 
 # Integration to Home-assistant
 Add ESPHome integration to Home-assistant from **Configuration - Devices & Services**
@@ -59,148 +61,71 @@ Add ESPHome integration to Home-assistant from **Configuration - Devices & Servi
 Esphome-ensto should be automatically discovered with 1 device and multiple entities.
 There is an example how to add sensor to Lovelace UI in *home-assistant/ui-lovelace.yaml* file. It will show reading and statuses from the thermostat in graphs.
 
-## Automation example
-In this automation example we will use one external temperature sensor to measure a real room temperature and control the thermostat to keep the real room temperature within ±1°C of selected target temperature. For that we use the Boost feature of the thermostat.
+## Usage with Thermostat Climate Controller
+Simplest way to control the thermostat is to add *climate.ensto1_thermostat* as a Thermostat card to Home Assistant. Turning Heat mode on will set boost modes accordingly to reach set temperature.
 
-First let's create adjustable target temperature value.
-Add following to *configuration.yaml* file of your home-assistant instance
+Thermostat Climate Controller requires setting external temperature sensor to *esphome-ensto.yaml* by changing *sensor.bedroom_temperature* to the ID of the sensor in Home Assistant that measures the actual temperature in the room where the thermostat is.
 
-    input_number:
-      ensto1_target_external_temperature:
-        name: Target external temperature
-        min: 15
-        max: 26
-        step: 0.1
-        unit_of_measurement: '°C'
-        icon: mdi:home-thermometer-outline
+    # External temperature sensor from Home Assistant for Climate Control
+      - platform: homeassistant
+        id: external_temperature_sensor
+        entity_id: sensor.bedroom_temperature
+        internal: true
+        accuracy_decimals: 2
+        # Optional filter in case original sensor requires filtering. Note that median filter will make reacting to temperature changes slower.
+        #filters:
+        #  - median:
+        #      window_size: 6
+        #      send_every: 1
+        #      send_first_at: 1
 
-Then add a dummy sensor for calculating temperature difference. It calculates difference between room temperature from external sensor (*sensor.bedroom_temperature*) and target temperature.
+## Advanced configuration
+Thermostat Climate Controller functionality can be adjusted by changing the value of
 
-    sensor:
-      - platform: template
-        sensors:
-          ensto1_target_temperature_diff:
-            unit_of_measurement: '°C'
-            entity_id:
-              - sensor.bedroom_temperature
-            value_template: >-
-              {% set room = states('sensor.bedroom_temperature')|float %}
-              {% set target = states('input_number.ensto1_target_external_temperature')|float %}
-              {% if room == 0.0 %}
-                {{ 0 }}
-              {% else %}
-                {{ (room - target)|round(2) }}
-              {% endif %}
+    heat_overrun: 0.5°C
 
-Home-assistant needs to be restarted after *configuration.yaml* has been modified. Restart button can be found from **Configuration - Settings - Server Controls** menu.
+and by modifying algorithm for setting the boost value.  
+Mainly this part
 
-Add new Gauge card to Home-assistant UI for controlling the target temperature. Clicking the Gauge card will show a slider for changing the value.
+    // finally overcompensate needed boost so that target temperature is actually reached
+    // These formulas could be improved
+    if (thermos_diff < 0) {
+        // too high temp -> big negative boost to turn heating completely off
+        needed_boost += -5;
+    } else if (thermos_diff > id(ensto1_thermostat).heat_overrun()) {
+        // below and not close to target (e.g. <0.5 from target) -> boost more than needed
+        needed_boost += 1;
+    } else {
+        // close to target -> double the diff
+        needed_boost += thermos_diff;
+    }
 
-    type: gauge
-    entity: input_number.ensto1_target_external_temperature
-    min: 15
-    max: 26
-    severity:
-      green: 19
-      yellow: 15
-      red: 22
-    needle: true
+Boost value is set on purpose to value that is too high or too low so that temperature reaches target temperature instead of device's thermostat keeping it just below the target because of variations in its internal temperature measurements.
 
-We can also add temperature difference between real room temperature and the target temperature to a history graph.
+# Observations
+## Power modes
+The device I have is Ensto Beta 10 BT EB 1000W.  
+According to the BT interface specification there are 5 different power modes:  
+1 = Floor  
+2 = Room  
+3 = Combination  
+4 = Power  
+5 = Force control  
 
-    type: history-graph
-    entities:
-      - entity: sensor.ensto1_temperature_calibration_value
-        name: Calibration value
-      - entity: sensor.ensto1_target_temperature_diff
-        name: Target diff
-      - entity: sensor.ensto1_temperature_boost_offset
-        name: Boost offset
-    hours_to_show: 24
-    refresh_interval: 0
+From those it can be set only to Room and Power modes.  
+Room mode uses temperature selection wheel from the device to set wanted temperature.  
+Power mode uses temperature selection wheel to directly controlling the power cycle of the device between 0-100%, meaning how much heating relay is ON and OFF.  
+I tested controlling temperature in both.
 
-And the target room temperature to a graph with other temperatures
+BT interface specification talks about Force control mode which could be used to set temperature selection wheel value programmatically, but values read from that bluetooth characteristic didn't match what is specified in the interface specification. I have not tried to use that mode.
 
-    type: history-graph
-    entities:
-      - entity: sensor.ensto1_room_temperature
-        name: Temperature
-      - entity: sensor.ensto1_target_temperature
-        name: Target
-      - entity: sensor.bedroom_temperature
-        name: External
-      - entity: input_number.ensto1_target_external_temperature
-        name: External target
-    hours_to_show: 24
-    refresh_interval: 0
+## Power control
+Boost in Room mode can be set as degrees from -20 to 20 allowing negative boost. Boost in Room mode uses device's internal temperature sensor to decide when and how much to heat to reach the temperature changed with the boost. 
 
-Now we can add new automation. Here is copy-paste from my automation.yaml, but it can be inputted using the UI. 
+Boost in Power mode is set as 0-100% on top of power output from selection wheel. So negative boost is not allowed. Automation in Power mode would require temperature selection wheel to be turned completely to 0% value so that full power range could be controlled with the boost offset.
 
-    - id: '1645461355693'
-      alias: Set Ensto boost value
-      description: ''
-      trigger:
-      - platform: state
-        entity_id: sensor.ensto1_target_temperature_diff
-      condition:
-      - condition: or
-        conditions:
-          - condition: numeric_state
-            entity_id: sensor.ensto1_target_temperature_diff
-            above: '1'
-          - condition: numeric_state
-            entity_id: sensor.ensto1_target_temperature_diff
-            below: '-1'
-      action:
-      - service: esphome.esphome_ensto_set_ensto1_temperature_boost_offset
-        data_template:
-          boost_offset: "{{ -1 * states.sensor.ensto1_target_temperature_diff.state | float }}"
-          length_minutes: "{{ 60 }}"
-      - delay:
-          hours: 0
-          minutes: 60
-          seconds: 0
-          milliseconds: 0
-      mode: single
+From device control point-of-view, using Power mode would give complete control to automation and this code to control the temperature to wanted value. I tested using PID Climate Controller component instead of Thermostat Climate Controller to reach and stay in selected target temperature. I was not able to make it work the way I would have wanted in Room mode, but I assume that in Power mode it could be used. In Room mode the automatic calibration didn't give values that would control temperature reliably. I didn't test it in Power mode.
 
-Above is "Single-mode" automation, meaning that only one instance of it is run at a time. The 60 minute delay at the end makes sure that automation is run only once per hour.  
-It uses State trigger for *sensor.ensto1_target_temperature_diff* value.  
-Condition for trigger is that Numeric state of the value is above 1 OR below -1. *Or* condition type must be added first and then 2 *Numeric state* conditions for above and below values.  
-Action uses following YAML (use edit in YAML)
-
-    service: esphome.esphome_ensto_set_ensto1_temperature_boost_offset
-    data_template:
-      boost_offset: "{{ -1 * states.sensor.ensto1_target_temperature_diff.state | float }}"
-      length_minutes: "{{ 60 }}"
-
-Second action is *Wait for time to pass* with 60 minutes as a value.
-
-
-Setting calibration value from Home Assistant UI can be done by adding another input_number for it
-
-    ensto1_temperature_calibration_value:
-      name: Temperature calibration value
-      min: -5
-      max: 5
-      step: 0.1
-      unit_of_measurement: '°C'
-      icon: mdi:home-thermometer-outline
-
-Then add Gauge card to UI just like for target temperature above, but with value ranges from -5 to 5.
-
-Then add automation using following values:
-
-    Alias: Send Ensto temperature calibration value
-    description: ""
-    trigger:
-      - platform: state
-        entity_id:
-          - input_number.ensto1_temperature_calibration_value
-    condition: []
-    action:
-      - service: esphome.esphome_ensto_set_ensto1_temperature_calibration
-        data:
-          temperature_offset: >-
-            {{ states.input_number.ensto1_temperature_calibration_value.state |
-            float }}
-    mode: single
+From risk management point-of-view, using Room mode is safer. When something goes wrong in ESP32, Bluetooth or this code, it usually happens at 2am and bedroom temperature is off by multiple degrees.  
+In Room mode all that is needed is to turn ESP32 or Thermostat Climate Controller from Home Assistant OFF and to trust device's own thermostat to take over for it to get to the temperature that is already set with the temperature selection wheel. Boost value set by ESP32 would timeout within 30 minutes.  
+In Power mode the mode would first need to be changed to Room mode, ESP32 would need to be turned OFF and then temperature selection wheel would need to be turned from zero to correct temperature.
