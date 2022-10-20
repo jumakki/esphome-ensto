@@ -1,6 +1,6 @@
 # esphome-ensto
 YAML only implementation of Ensto thermostat support for ESPHome.  
-Requires ESPHome 2022.9.3 or later.
+Requires ESPHome 2022.10.0 or later.
 
 # Installation
 ## Docker-compose
