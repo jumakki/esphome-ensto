@@ -131,6 +131,7 @@ binary_sensor:
 sensor:
 # Real-time information (temperatures, is heating relay active)
   - platform: ble_client
+    type: characteristic
     ble_client_id: ensto1
     id: ensto1_real_time_indication_characteristic
     internal: true
@@ -209,6 +210,7 @@ sensor:
 
 # Adaptive temperature control status
   - platform: ble_client
+    type: characteristic
     ble_client_id: ensto1
     id: ensto1_adaptive_temp_control_characteristic
     internal: true
@@ -231,6 +233,7 @@ sensor:
 
 # Temperature calibration
   - platform: ble_client
+    type: characteristic
     ble_client_id: ensto1
     id: ensto1_temp_calibration_characteristic
     internal: true
@@ -260,6 +263,7 @@ sensor:
 
 # Temperature boost
   - platform: ble_client
+    type: characteristic
     ble_client_id: ensto1
     id: ensto1_boost_characteristic
     internal: true
@@ -305,6 +309,7 @@ sensor:
 
 # Power consumption
   - platform: ble_client
+    type: characteristic
     ble_client_id: ensto1
     id: ensto1_power_consumption_characteristic
     internal: true
@@ -372,6 +377,7 @@ sensor:
 
 # Max heating power (set manually from App)
   - platform: ble_client
+    type: characteristic
     ble_client_id: ensto1
     id: ensto1_heating_power_characteristic
     internal: true
@@ -394,6 +400,7 @@ sensor:
 
 # LED brightness
   - platform: ble_client
+    type: characteristic
     ble_client_id: ensto1
     id: ensto1_led_brightness_characteristic
     internal: true
@@ -429,6 +436,7 @@ sensor:
 
 # Energy unit price (set manually from App)
   - platform: ble_client
+    type: characteristic
     ble_client_id: ensto1
     id: ensto1_energy_unit_characteristic
     internal: true
@@ -461,6 +469,7 @@ sensor:
 
 # Factory reset ID
   - platform: ble_client
+    type: characteristic
     ble_client_id: ensto1
     id: ensto1_security_key_characteristic
     internal: true
@@ -759,9 +768,9 @@ climate:
     sensor: external_temperature_sensor
     preset:
       - name: home  # default
-        default_target_temperature_low: 20°C
+        default_target_temperature_low: 20.0°C
         mode: heat
-    default_target_temperature_low: 20°C # to be deprecated
+#    default_target_temperature_low: 20°C # to be deprecated
     heat_overrun: 0.5°C      # used in state machine above
     min_idle_time: 5s        # not really used, required field
     min_heating_off_time: 5s # not really used, required field
