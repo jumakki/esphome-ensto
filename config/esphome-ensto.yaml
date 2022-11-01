@@ -585,7 +585,6 @@ interval:
                     id(ensto1_adaptive_temp_control_characteristic).update();
                     id(ensto1_temp_calibration_characteristic).update();
                     id(ensto1_led_brightness_characteristic).update();
-                    
                 }
                 if (id(ensto1_interval_count) % 61 == 0) { // every ~5 minutes
                     id(ensto1_heating_power_characteristic).update();                    
@@ -625,15 +624,15 @@ interval:
 
                     // finally overcompensate needed boost so that target temperature is actually reached
                     // These formulas could be improved
-                    if (thermos_diff < 0) {
-                        // too high temp -> big negative boost to turn heating completely off
+                    if (thermos_diff < -1 * id(ensto1_thermostat).heat_overrun()) {
+                        // above and not close to target (e.g. >0.5 from target) -> big negative boost to turn heating completely off
                         needed_boost += -5;
-                    } else if (thermos_diff > id(ensto1_thermostat).heat_overrun()) {
+                    } else if (thermos_diff > id(ensto1_thermostat).heat_deadband()) {
                         // below and not close to target (e.g. <0.5 from target) -> boost more than needed
-                        needed_boost += 1;
+                        needed_boost += 2;
                     } else {
-                        // close to target -> double the diff
-                        needed_boost += thermos_diff;
+                        // close to target -> try to keep it here
+                        needed_boost += thermos_diff * 1.5;
                     }
 
                     int16_t value = round(needed_boost * 100);
@@ -771,13 +770,13 @@ climate:
         default_target_temperature_low: 20.0°C
         mode: heat
 #    default_target_temperature_low: 20°C # to be deprecated
-    heat_overrun: 0.5°C      # used in state machine above
+    # these 2 are used in state machine above
+    heat_deadband: 0.5°C     # The minimum temperature differential (temperature below the set point) before engaging extra heating
+    heat_overrun: 0.5°C      # The minimum temperature differential (temperature above the set point) before disengaging heat
     min_idle_time: 5s        # not really used, required field
     min_heating_off_time: 5s # not really used, required field
     min_heating_run_time: 5s # not really used, required field
     heat_action:
-      - lambda: |-
-          ; // heating control is handled in state machine
+      - lambda: !lambda ';' # heating control is handled in state machine
     idle_action:
-      - lambda: |-
-          ;
+      - lambda: !lambda ';' # idle control is handled in state machine
