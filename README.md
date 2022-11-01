@@ -82,6 +82,7 @@ Thermostat Climate Controller requires setting external temperature sensor to *e
 ## Advanced configuration
 Thermostat Climate Controller functionality can be adjusted by changing the value of
 
+    heat_deadband: 0.5°C
     heat_overrun: 0.5°C
 
 and by modifying algorithm for setting the boost value.  
@@ -89,15 +90,15 @@ Mainly this part
 
     // finally overcompensate needed boost so that target temperature is actually reached
     // These formulas could be improved
-    if (thermos_diff < 0) {
-        // too high temp -> big negative boost to turn heating completely off
+    if (thermos_diff < -1 * id(ensto1_thermostat).heat_overrun()) {
+        // above and not close to target (e.g. >0.5 from target) -> big negative boost to turn heating completely off
         needed_boost += -5;
-    } else if (thermos_diff > id(ensto1_thermostat).heat_overrun()) {
+    } else if (thermos_diff > id(ensto1_thermostat).heat_deadband()) {
         // below and not close to target (e.g. <0.5 from target) -> boost more than needed
-        needed_boost += 1;
+        needed_boost += 2;
     } else {
-        // close to target -> double the diff
-        needed_boost += thermos_diff;
+        // close to target -> double the diff and try to keep it here
+        needed_boost += thermos_diff * 1.5;
     }
 
 Boost value is set on purpose to value that is too high or too low so that temperature reaches target temperature instead of device's thermostat keeping it just below the target because of variations in its internal temperature measurements.
