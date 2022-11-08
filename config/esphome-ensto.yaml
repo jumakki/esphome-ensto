@@ -4,10 +4,23 @@ esphome:
   #board: esp32dev
   board: esp32doit-devkit-v1
 
-# Enable logging
+# Enable logging. Note that too much logging will cause connections to break.
 logger:
   logs:
-    esp32_ble_tracker: DEBUG
+    esp32_ble_tracker: INFO        # DEBUG to show discovered devices
+    sensor: INFO                   # DEBUG to show sensor value updates to HA
+    climate: INFO                  # DEBUG to show climate status updates to HA
+    template.sensor: NONE          # CRITICAL to list sensors after WiFi connect
+    template.binary_sensor: NONE   # CRITICAL to list sensors after WiFi connect
+    esp32_ble_client: INFO         # WARN to not show service UUIDs
+    esp32_ble_client.service: NONE # INFO to list ensto characteristics
+    ble_client.automation: INFO    # DEBUG to show connections
+    thermostat.climate: NONE       # CRITICAL to show default values
+    ble_sensor: WARN               # INFO to show connected characteristics
+    homeassistant.sensor: DEBUG    # INFO to not show updates from external temperature sensor
+    ensto: INFO                    # DEBUG to show extra logging from this YAML
+    ensto.adv: INFO                # DEBUG to show extra logging from this YAML about advertisements
+    ensto.receive: INFO            # DEBUG to show extra logging from this YAML about received data from characteristics
 
 ota:
 
@@ -23,23 +36,28 @@ wifi:
 
 esp32_ble_tracker:
   id: ble_tracker
-  scan_parameters: 
+  scan_parameters:
+    # Ensto sends one advertisement package every 200ms. With 320ms interval and 60ms window 
+    # we will have a change to receive advertisement about once per second. That should be enough.
+    # With defaults (320ms & 30ms) it would be once every 3 seconds.
+    interval: 320ms
+    window: 60ms
     active: false
   on_ble_advertise:
     - mac_address: !secret ensto1_mac
       then:
         - lambda: |-
-            ESP_LOGI("ble_adv", "New BLE device");
-            ESP_LOGI("ble_adv", "  address: %s", x.address_str().c_str());
-            ESP_LOGI("ble_adv", "  Advertised manufacturer data:");
+            ESP_LOGI("ensto.adv", "New BLE device");
+            ESP_LOGD("ensto.adv", "  address: %s", x.address_str().c_str());
+            ESP_LOGI("ensto.adv", "  Advertised manufacturer data:");
             auto man_datas = x.get_manufacturer_datas();
             for (auto man_data : man_datas) {
-                ESP_LOGI("ble_adv", "    - %s (length %i)", man_data.uuid.to_string().c_str(), man_data.data.size());
+                ESP_LOGD("ensto.adv", "    - %s (length %i)", man_data.uuid.to_string().c_str(), man_data.data.size());
                 if (man_data.uuid.get_uuid().uuid.uuid16 != 0x2806) {
                   continue;
                 }
                 auto data = man_data.data;
-                ESP_LOGI("ble_adv", "    - %s", &data[0]);
+                ESP_LOGI("ensto.adv", "    - %s", &data[0]);
                 if (data.size() < 3) {
                     continue;
                 }
@@ -49,7 +67,7 @@ esp32_ble_tracker:
                     continue;
                 }
                 id(ensto1_is_pairing) = data_str[semi_pos + 1] == '1';
-                ESP_LOGI("ble_adv", "    - is pairing = %s", id(ensto1_is_pairing) ? "true" : "false");
+                ESP_LOGI("ensto.adv", "    - is pairing = %s", id(ensto1_is_pairing) ? "true" : "false");
             }
   on_scan_end: # restart scan if device was not found
     - if:
@@ -60,7 +78,6 @@ esp32_ble_tracker:
           - lambda: |-
               id(ble_tracker).start_scan();
 
-    
 globals:
   - id: ensto1_factory_reset_id
     type: uint32_t
@@ -89,31 +106,29 @@ ble_client:
     on_connect:
       then:
         - lambda: |-
-            ESP_LOGI("ensto1 on_connect", "Connected to Ensto");
-
             esphome::ble_client::BLEClient* client = id(ensto1);
             esp_ble_set_encryption(client->get_remote_bda(), ESP_BLE_SEC_ENCRYPT_MITM);
             if (id(ensto1_is_pairing)) {
-                ESP_LOGI("ensto1 on_connect", "Connected to Ensto1 (pairing) -> read factory reset ID");
+                ESP_LOGI("ensto", "Connected to Ensto1 (pairing) -> read factory reset ID");
                 id(ensto1_state) = 1; // read new factory reset ID
                 return;
             }
             uint32_t key = id(ensto1_factory_reset_id);
             if (key == 0) {
-              ESP_LOGW("ensto1 on_connect", "Factory reset ID is not set. Must be paired first.");
+              ESP_LOGE("ensto", "Factory reset ID is not set. Must be paired first.");
               return;
             }
-            ESP_LOGI("ensto1 on_connect", "Connected to Ensto1 -> write factory reset ID");
+            ESP_LOGI("ensto", "Connected to Ensto1 -> write factory reset ID");
             id(ensto1_state) = 2; // write old factory reset id
             
     on_disconnect:
       then:
         - lambda: |-
-            ESP_LOGI("ensto1 on_disconnect", "Disconnected from Ensto1");
+            ESP_LOGI("ensto", "Disconnected from Ensto1");
             id(ensto1_connection_state).publish_state(false);
             id(ensto1_state) = 0; // disconnected
             id(ble_tracker).start_scan();
-            
+
 binary_sensor:
   - platform: template
     id: ensto1_connection_state
@@ -124,9 +139,9 @@ binary_sensor:
   - platform: template
     id: ensto1_boost_status
     name: "Ensto1 Boost status"
-  - platform: template
-    id: ensto1_adaptive_temperature_control_status
-    name: "Ensto1 Adaptive temperature control status"
+  # - platform: template
+  #   id: ensto1_adaptive_temperature_control_status
+  #   name: "Ensto1 Adaptive temperature control status"
 
 sensor:
 # Real-time information (temperatures, is heating relay active)
@@ -140,16 +155,17 @@ sensor:
     notify: false
     update_interval: never
     lambda: |-
-      ESP_LOGI("ble_client.receive", "ensto1 real-time values received with %d bytes", x.size());
+      ESP_LOGD("ensto.receive", "Real-time values received with %d bytes", x.size());
       if (x.size() < 20) return NAN;
       auto target_temp = (x[1] + 256 * x[2]) / 10.0f;
       auto room_temp = (int16_t)((x[4] + 256 * x[5])) / 10.0f;
       auto floor_temp = (int16_t)((x[6] + 256 * x[7])) / 10.0f;
       if (target_temp == 0 && room_temp == 0 && floor_temp == 0) {
           // security key was not written correctly -> don't update
-          ESP_LOGW("ble_client.receive", "ensto1 real-time values are zero");
+          ESP_LOGW("ensto.receive", "Real-time values are zero");
           return NAN;
       }
+      ESP_LOGI("ensto.receive", "Room: %.1f°C, Floor: %.1f°C, Target: %.1f°C", room_temp, floor_temp, target_temp);
       static bool is_first = true;
       // statics to update values to home-assistant only when they change
       static auto last_target_temp = target_temp;
@@ -173,12 +189,14 @@ sensor:
           last_relay_state = relay_state;
           id(ensto1_relay_state).publish_state(relay_state);
       }
+      /*
       uint8_t heating_mode = x[14];
       static uint8_t last_heating_mode = heating_mode;
       if (is_first || last_heating_mode != heating_mode) {
           last_heating_mode = heating_mode;
           id(ensto1_heating_mode).publish_state(heating_mode);
       }
+      */
       is_first = false;
       return NAN;
 
@@ -203,33 +221,33 @@ sensor:
     accuracy_decimals: 1
     state_class: measurement
     device_class: temperature
-  - platform: template
-    name: "Ensto1 Heating mode"
-    id: ensto1_heating_mode
-    unit_of_measurement: "mode"
+  # - platform: template
+  #   name: "Ensto1 Heating mode"
+  #   id: ensto1_heating_mode
+  #   unit_of_measurement: "mode"
 
-# Adaptive temperature control status
-  - platform: ble_client
-    type: characteristic
-    ble_client_id: ensto1
-    id: ensto1_adaptive_temp_control_characteristic
-    internal: true
-    service_uuid: F49CEFD5-209B-4531-99BD-89FE2909931A
-    characteristic_uuid: c2dc85e9-47bf-4968-9562-d2e1980ed4e4
-    notify: false
-    update_interval: never
-    lambda: |-
-      ESP_LOGI("ble_client.receive", "Adaptive temp control characteristic received with %d bytes", x.size());
-      if (x.size() < 1) return NAN;
-      static bool is_first = true;
-      bool is_adaptive = x[0];
-      static bool last_is_adaptive = is_adaptive;
-      if (is_first || last_is_adaptive != is_adaptive) {
-          is_first = false;
-          last_is_adaptive = is_adaptive;
-          id(ensto1_adaptive_temperature_control_status).publish_state(is_adaptive);
-      }
-      return NAN;
+# # Adaptive temperature control status
+#   - platform: ble_client
+#     type: characteristic
+#     ble_client_id: ensto1
+#     id: ensto1_adaptive_temp_control_characteristic
+#     internal: true
+#     service_uuid: F49CEFD5-209B-4531-99BD-89FE2909931A
+#     characteristic_uuid: c2dc85e9-47bf-4968-9562-d2e1980ed4e4
+#     notify: false
+#     update_interval: never
+#     lambda: |-
+#       if (x.size() < 1) return NAN;
+#       static bool is_first = true;
+#       bool is_adaptive = x[0];
+#       ESP_LOGI("ensto.receive", "Adaptive temp control mode: %d", x[0]);
+#       static bool last_is_adaptive = is_adaptive;
+#       if (is_first || last_is_adaptive != is_adaptive) {
+#           is_first = false;
+#           last_is_adaptive = is_adaptive;
+#           id(ensto1_adaptive_temperature_control_status).publish_state(is_adaptive);
+#       }
+#       return NAN;
 
 # Temperature calibration
   - platform: ble_client
@@ -242,9 +260,10 @@ sensor:
     notify: false
     update_interval: never
     lambda: |-
-      ESP_LOGI("ble_client.receive", "Temp calibration characteristic received with %d bytes", x.size());
+      ESP_LOGD("ensto.receive", "Temperature calibration characteristic received with %d bytes", x.size());
       if (x.size() < 2) return NAN;
       auto temp_cal = (int16_t)(256 * x[1] + x[0]);
+      ESP_LOGI("ensto.receive", "Temperature calibration value: %.1f°C", temp_cal / 10.0f);
       static auto last_temp_cal = temp_cal;
       static bool is_first = true;
       if (is_first || last_temp_cal != temp_cal) {
@@ -272,7 +291,7 @@ sensor:
     notify: false
     update_interval: never
     lambda: |-
-      ESP_LOGI("ble_client.receive", "Boost characteristic received with %d bytes", x.size());
+      ESP_LOGD("ensto.receive", "Boost characteristic received with %d bytes", x.size());
       if (x.size() < 8) return NAN;
       auto is_boost_on = x[0] != 0;
       static bool is_first = true;
@@ -288,6 +307,7 @@ sensor:
           id(ensto1_temp_boost_offset).publish_state(boost_offset / 100.0f);
       }
       auto boost_minutes_left = (uint16_t)(256 * x[7] + x[6]);
+      ESP_LOGI("ensto.receive", "Boost: %s, offset: %.2f°C, minutes left: %d", (is_boost_on ? "ON" : "OFF"), boost_offset/100.0f, boost_minutes_left);
       static auto last_boost_minutes_left = boost_minutes_left;
       if (is_first || last_boost_minutes_left != boost_minutes_left) {
           last_boost_minutes_left = boost_minutes_left;
@@ -319,20 +339,24 @@ sensor:
     update_interval: never
     lambda: |-
       // format (uint8_t): <header><current hour><current date><current month><current year> following 25x(<hour delta from current><consumption ratio>)
-      // ESP_LOGI("ble_client.receive", "Power consumption characteristic received with %d bytes: %s", x.size(), format_hex(x.data(), x.size()).c_str());
+      // ESP_LOGD("ensto.receive", "Power consumption characteristic received with %d bytes: %s", x.size(), format_hex(x.data(), x.size()).c_str());
       if (x.size() < 9) return NAN;
+      if (x[5] != 0) return NAN; // current hour offset should be 0
+      if (x[7] != 1) return NAN; // previous hour offset should be 1
+
+      ESP_LOGI("ensto.receive", "Power consumption ratio: %d%%, last hour: %d%%", x[6], x[8]);
+      id(ensto1_power_consumption_ratio_current_hour).publish_state(x[6]);
+      id(ensto1_power_consumption_ratio_previous_hour).publish_state(x[8]);
+
+      if (!id(ensto1_max_heating_power).has_state()) return NAN; // not updated yet
       uint32_t power = id(ensto1_max_heating_power).get_state();
+      id(ensto1_power_consumption_current_hour).publish_state(x[6] * power / 1000.0 / 100.0);
+      id(ensto1_power_consumption_previous_hour).publish_state(x[8] * power / 1000.0 / 100.0);
+
+      if (!id(ensto1_price_per_kwh).has_state()) return NAN; // not updated yet
       auto price = id(ensto1_price_per_kwh).get_state();
-      if (x[5] == 0) { // current hour (consumption so far)
-          id(ensto1_power_consumption_ratio_current_hour).publish_state(x[6]);
-          id(ensto1_power_consumption_current_hour).publish_state(x[6] * power / 1000.0 / 100.0);
-          id(ensto1_price_current_hour).publish_state(x[6] * power / 1000.0 / 100.0 * price);
-      }
-      if (x[7] == 1) { // previous hour
-          id(ensto1_power_consumption_ratio_previous_hour).publish_state(x[8]);
-          id(ensto1_power_consumption_previous_hour).publish_state(x[8] * power / 1000.0 / 100.0);
-          id(ensto1_price_previous_hour).publish_state(x[8] * power / 1000.0 / 100.0 * price);
-      }
+      id(ensto1_price_current_hour).publish_state(x[6] * power / 1000.0 / 100.0 * price);
+      id(ensto1_price_previous_hour).publish_state(x[8] * power / 1000.0 / 100.0 * price);
       return NAN;
   - platform: template
     name: "Ensto1 Power consumption ratio current hour"
@@ -387,8 +411,9 @@ sensor:
     update_interval: never
     lambda: |-
       // format (all single byte): <header><current hour><current date><current month><current year> following 25x(<hour delta from current><consumption ratio>)
-      ESP_LOGI("ble_client.receive", "Heating Power characteristic received with %d bytes: %s", x.size(), format_hex(x.data(), x.size()).c_str());
+      ESP_LOGD("ensto.receive", "Heating Power characteristic received with %d bytes: %s", x.size(), format_hex(x.data(), x.size()).c_str());
       if (x.size() < 2) return NAN;
+      ESP_LOGI("ensto.receive", "Heating Power: %dW", (int16_t)(256 * x[1] + x[0]));
       id(ensto1_max_heating_power).publish_state((int16_t)(256 * x[1] + x[0]));
       return NAN;
   - platform: template
@@ -398,41 +423,41 @@ sensor:
     device_class: power
     unit_of_measurement: "W"
 
-# LED brightness
-  - platform: ble_client
-    type: characteristic
-    ble_client_id: ensto1
-    id: ensto1_led_brightness_characteristic
-    internal: true
-    service_uuid: F49CEFD5-209B-4531-99BD-89FE2909931A
-    characteristic_uuid: 0bee30ff-ed95-4747-bf1b-01a60f5ff4fc
-    notify: false
-    update_interval: never
-    lambda: |-
-      if (x.size() < 3) return NAN;
-      auto red = x[0];
-      auto green = x[1];
-      auto blue = x[2];
-      ESP_LOGI("ble_client.receive", "LED brightness characteristic received: red=%d, green=%d, blue=%d", red, green, blue);
-      id(ensto1_red_led_brightness).publish_state(red);
-      id(ensto1_green_led_brightness).publish_state(green);
-      id(ensto1_blue_led_brightness).publish_state(blue);
-      return NAN;
-  - platform: template
-    name: "Ensto1 Red LED brightness"
-    id: ensto1_red_led_brightness
-    accuracy_decimals: 0
-    unit_of_measurement: "%"
-  - platform: template
-    name: "Ensto1 Green LED brightness"
-    id: ensto1_green_led_brightness
-    accuracy_decimals: 0
-    unit_of_measurement: "%"
-  - platform: template
-    name: "Ensto1 Blue LED brightness"
-    id: ensto1_blue_led_brightness
-    accuracy_decimals: 0
-    unit_of_measurement: "%"
+# # LED brightness
+#   - platform: ble_client
+#     type: characteristic
+#     ble_client_id: ensto1
+#     id: ensto1_led_brightness_characteristic
+#     internal: true
+#     service_uuid: F49CEFD5-209B-4531-99BD-89FE2909931A
+#     characteristic_uuid: 0bee30ff-ed95-4747-bf1b-01a60f5ff4fc
+#     notify: false
+#     update_interval: never
+#     lambda: |-
+#       if (x.size() < 3) return NAN;
+#       auto red = x[0];
+#       auto green = x[1];
+#       auto blue = x[2];
+#       ESP_LOGI("ensto.receive", "LED brightness: red=%d%%, green=%d%%, blue=%d%%", red, green, blue);
+#       id(ensto1_red_led_brightness).publish_state(red);
+#       id(ensto1_green_led_brightness).publish_state(green);
+#       id(ensto1_blue_led_brightness).publish_state(blue);
+#       return NAN;
+#   - platform: template
+#     name: "Ensto1 Red LED brightness"
+#     id: ensto1_red_led_brightness
+#     accuracy_decimals: 0
+#     unit_of_measurement: "%"
+#   - platform: template
+#     name: "Ensto1 Green LED brightness"
+#     id: ensto1_green_led_brightness
+#     accuracy_decimals: 0
+#     unit_of_measurement: "%"
+#   - platform: template
+#     name: "Ensto1 Blue LED brightness"
+#     id: ensto1_blue_led_brightness
+#     accuracy_decimals: 0
+#     unit_of_measurement: "%"
 
 # Energy unit price (set manually from App)
   - platform: ble_client
@@ -454,7 +479,7 @@ sensor:
       if (currency == 3) currency_str = "NOK";
       if (currency == 4) currency_str = "RUB";
       if (currency == 5) currency_str = "$";
-      ESP_LOGI("ble_client.receive", "Energy unit characteristic received: currency=%d (%s), price=%f", currency, currency_str.c_str(), price);
+      ESP_LOGI("ensto.receive", "Energy unit: currency=%d (%s), price=%.2f", currency, currency_str.c_str(), price);
       id(ensto1_currency_id).publish_state(currency);
       id(ensto1_price_per_kwh).publish_state(price);
       return NAN;
@@ -482,12 +507,12 @@ sensor:
 
       uint32_t key = x[0] | x[1] << 8 | x[2] << 16 | x[3] << 24;
       if (key == 0) {
-          ESP_LOGW("ensto1_pairing", "Reading Ensto1 factory reset ID failed");
+          ESP_LOGW("ensto", "Reading Ensto1 factory reset ID failed");
           return NAN; // couldn't get pairing key
       }
-      ESP_LOGI("ensto1_pairing", "key read = %02x%02x%02x%02x", x[0], x[1], x[2], x[3]);
+      ESP_LOGD("ensto", "key read = %02x%02x%02x%02x", x[0], x[1], x[2], x[3]);
       id(ensto1_factory_reset_id) = key;
-      ESP_LOGI("ensto1_pairing", "Factory reset ID read -> write factory reset ID");
+      ESP_LOGI("ensto", "Factory reset ID read -> write factory reset ID");
       id(ensto1_state) = 2; // write key back
       return NAN;
 
@@ -508,16 +533,13 @@ sensor:
 interval:
   - interval: 5s
     then: 
-      - lambda: |-
-          id(ensto1_interval_count) = id(ensto1_interval_count) + 1;
+      - lambda: !lambda 'id(ensto1_interval_count) = id(ensto1_interval_count) + 1;'
       # 1 = pairing, read factory reset ID
       - if:
           condition:
-            lambda: |-
-              return id(ensto1_state) == 1;
+            lambda: !lambda 'return id(ensto1_state) == 1;'
           then:
-            - lambda: |-
-                id(ensto1_security_key_characteristic).update();
+            - lambda: !lambda 'id(ensto1_security_key_characteristic).update();'
       # 2 = write factory reset ID (if it is not zero)
       - if:
           condition:
@@ -537,8 +559,7 @@ interval:
                         (uint8_t)((key >> 16) & 0xff),
                         (uint8_t)((key >> 24) & 0xff),
                     };
-                    ESP_LOGI("ensto1 write key", "%02x%02x%02x%02x", newVal[0], newVal[1], newVal[2], newVal[3]);
-                    ESP_LOGI("ensto1 write key", "Factory reset ID written -> Connected");
+                    ESP_LOGI("ensto", "Factory reset ID written -> Connected");
                     id(ensto1_connection_state).publish_state(true);
                     id(ensto1_state) = 3; // connected
                     id(ble_tracker).stop_scan();
@@ -546,8 +567,7 @@ interval:
       # 3+ = connected, read characteristics once in a while
       - if:
           condition:
-            lambda: |-
-                return id(ensto1_state) >= 3;
+            lambda: !lambda 'return id(ensto1_state) >= 3;'
           then:
             - lambda: |-
                 // Ensto disconnects if some characteristic is not read for 30 seconds
@@ -558,9 +578,11 @@ interval:
                 }
                 if (id(ensto1_interval_count) % 3 == 0) {
                     // update if sensor values are not valid after reconnect
+                    /*
                     if (!id(ensto1_adaptive_temperature_control_status).has_state()) {
                         id(ensto1_adaptive_temp_control_characteristic).update();
                     }
+                    */
                     if (!id(ensto1_temp_calibration).has_state()) {
                         id(ensto1_temp_calibration_characteristic).update();
                     }
@@ -573,18 +595,20 @@ interval:
                     if (!id(ensto1_price_per_kwh).has_state()) {
                         id(ensto1_energy_unit_characteristic).update();
                     }
+                    /*
                     if (!id(ensto1_red_led_brightness).has_state()) {
                         id(ensto1_led_brightness_characteristic).update();
                     }
+                    */
                 }
                 if (id(ensto1_interval_count) % 12 == 0) { // every 60 seconds
                     id(ensto1_power_consumption_characteristic).update();
                     id(ensto1_energy_unit_characteristic).update();
                 }
                 if (id(ensto1_interval_count) % 13 == 0) { // every 65 seconds
-                    id(ensto1_adaptive_temp_control_characteristic).update();
+                    // id(ensto1_adaptive_temp_control_characteristic).update();
                     id(ensto1_temp_calibration_characteristic).update();
-                    id(ensto1_led_brightness_characteristic).update();
+                    // id(ensto1_led_brightness_characteristic).update();
                 }
                 if (id(ensto1_interval_count) % 61 == 0) { // every ~5 minutes
                     id(ensto1_heating_power_characteristic).update();                    
@@ -640,7 +664,7 @@ interval:
 
                     uint16_t minutes = 15; // TODO: hardcoded
                     // uint16_t minutes = std::max(0, std::min(length_minutes, 255));
-                    ESP_LOGI("ble_client.write_action", "New climate boost offset set to %d for %u minutes", value, minutes);
+                    ESP_LOGI("ensto", "New climate boost offset set to %.2f°C for %u minutes", value/100.0f, minutes);
                     return {
                         1, // enable
                         (uint8_t)(value & 0xff), (uint8_t)((value >> 8) & 0xff), // int16_t offset
@@ -658,8 +682,7 @@ api:
       then:
         - if:
             condition:
-              lambda: |-
-                  return id(ensto1_connection_state);
+              lambda: !lambda 'return id(ensto1_connection_state);'
             then:
               - ble_client.ble_write:
                   id: ensto1
@@ -669,7 +692,7 @@ api:
                       int16_t value = round(temperature_offset * 10);
                       // ensure it is within limits
                       value = std::max<int16_t>(-50, std::min<int16_t>(value, 50));
-                      ESP_LOGI("ble_client.write_action", "New calibration value set to %d", value);
+                      ESP_LOGI("ensto", "New temperature calibration value set to %d", value);
                       return {(uint8_t)(value & 0xff), (uint8_t)((value >> 8) & 0xff)};
 # Temperature boost offset has valid range of -20.00..20.00C written as -2000..2000 to Ensto
 # Boost length is given as minutes. According to specification the value is uint8_t, so valid range is 0..255.
@@ -680,8 +703,7 @@ api:
       then:
         - if:
             condition:
-              lambda: |-
-                  return id(ensto1_connection_state);
+              lambda: !lambda 'return id(ensto1_connection_state);'
             then:
               - ble_client.ble_write:
                   id: ensto1
@@ -691,7 +713,7 @@ api:
                       int16_t value = round(boost_offset * 100);
                       value = std::max<int16_t>(-2000, std::min<int16_t>(value, 2000));
                       uint16_t minutes = std::max(0, std::min(length_minutes, 255));
-                      ESP_LOGI("ble_client.write_action", "New boost offset set to %d for %u minutes", value, minutes);
+                      ESP_LOGI("ensto", "New temperature boost offset set to %d for %u minutes", value, minutes);
                       return {
                           1, // enable
                           (uint8_t)(value & 0xff), (uint8_t)((value >> 8) & 0xff), // int16_t offset
@@ -705,8 +727,7 @@ api:
       then:
         - if:
             condition:
-              lambda: |-
-                  return id(ensto1_connection_state);
+              lambda: !lambda 'return id(ensto1_connection_state);'
             then:
               - ble_client.ble_write:
                   id: ensto1
@@ -715,7 +736,7 @@ api:
                   value: !lambda |-
                       // ensure it is within limits
                       uint16_t value = std::max<int32_t>(0, std::min<int32_t>(max_power, std::numeric_limits<uint16_t>::max()));
-                      ESP_LOGI("ble_client.write_action", "New max heating power value set to %d", value);
+                      ESP_LOGI("ensto", "New max heating power value set to %dW", value);
                       return {(uint8_t)(value & 0xff), (uint8_t)((value >> 8) & 0xff)};
 # Price of electricity per kWh (e.g. 0.09€). Energy unit IDs: use_previous=0, EUR=1, SEK=2, NOK=3, RUB=4, USD=5
     - service: set_ensto1_kwh_price
@@ -725,8 +746,7 @@ api:
       then:
         - if:
             condition:
-              lambda: |-
-                  return id(ensto1_connection_state) && (energy_unit_id >= 0 && energy_unit_id <= 5);
+              lambda: !lambda 'return id(ensto1_connection_state) && (energy_unit_id >= 0 && energy_unit_id <= 5);'
             then:
               - ble_client.ble_write:
                   id: ensto1
@@ -734,31 +754,31 @@ api:
                   characteristic_uuid: ccf1fe7b-d928-45b1-abba-7a915f2f0c64
                   value: !lambda |-
                       auto unit_id = energy_unit_id;
-                      if (unit_id == 0) unit_id = id(ensto1_currency_id).get_state();
+                      if (unit_id == 0 && id(ensto1_currency_id).has_state()) unit_id = id(ensto1_currency_id).get_state();
                       uint16_t value = std::max<uint16_t>(0, std::min<uint16_t>(price_per_kwh * 100, std::numeric_limits<uint16_t>::max()));
-                      ESP_LOGI("ble_client.write_action", "New price of electricity per kWh set to %f (unit ID=%d)", price_per_kwh, unit_id);
+                      ESP_LOGI("ensto", "New price of electricity per kWh set to %.2f (unit ID=%d)", price_per_kwh, unit_id);
                       return {(uint8_t)(unit_id & 0xff), 0, (uint8_t)(value & 0xff), (uint8_t)((value >> 8) & 0xff)};
-# Led brightness percentage (0-100)
-    - service: set_ensto1_led_brightness_percentage
-      variables:
-        red: int
-        green: int
-        blue: int
-      then:
-        - if:
-            condition:
-              lambda: |-
-                  return id(ensto1_connection_state);
-            then:
-              - ble_client.ble_write:
-                  id: ensto1
-                  service_uuid: F49CEFD5-209B-4531-99BD-89FE2909931A
-                  characteristic_uuid: 0bee30ff-ed95-4747-bf1b-01a60f5ff4fc
-                  value: !lambda |-
-                      ESP_LOGI("ble_client.write_action", "New LED brightness values set to: red=%d, green=%d, blue=%d", red, green, blue);
-                      return {(uint8_t)(std::max(0, std::min(red, 100)) & 0xff), 
-                              (uint8_t)(std::max(0, std::min(green, 100)) & 0xff),
-                              (uint8_t)(std::max(0, std::min(blue, 100)) & 0xff)};
+
+# # Led brightness percentage (0-100)
+#     - service: set_ensto1_led_brightness_percentage
+#       variables:
+#         red: int
+#         green: int
+#         blue: int
+#       then:
+#         - if:
+#             condition:
+#               lambda: !lambda 'return id(ensto1_connection_state);'
+#             then:
+#               - ble_client.ble_write:
+#                   id: ensto1
+#                   service_uuid: F49CEFD5-209B-4531-99BD-89FE2909931A
+#                   characteristic_uuid: 0bee30ff-ed95-4747-bf1b-01a60f5ff4fc
+#                   value: !lambda |-
+#                       ESP_LOGI("ensto", "New LED brightness values set to: red=%d, green=%d, blue=%d", red, green, blue);
+#                       return {(uint8_t)(std::max(0, std::min(red, 100)) & 0xff), 
+#                               (uint8_t)(std::max(0, std::min(green, 100)) & 0xff),
+#                               (uint8_t)(std::max(0, std::min(blue, 100)) & 0xff)};
 
 climate:
   - platform: thermostat
@@ -769,7 +789,7 @@ climate:
       - name: home  # default
         default_target_temperature_low: 20.0°C
         mode: heat
-#    default_target_temperature_low: 20°C # to be deprecated
+#    default_target_temperature_low: 20°C # deprecated
     # these 2 are used in state machine above
     heat_deadband: 0.5°C     # The minimum temperature differential (temperature below the set point) before engaging extra heating
     heat_overrun: 0.5°C      # The minimum temperature differential (temperature above the set point) before disengaging heat
