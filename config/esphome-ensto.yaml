@@ -73,7 +73,7 @@ esp32_ble_tracker:
     - if:
         condition:
           - lambda: |-
-              return id(ensto1_connection_state) == false;
+              return id(ensto1_connection_state).state == false;
         then:
           - lambda: |-
               id(ble_tracker).start_scan();
