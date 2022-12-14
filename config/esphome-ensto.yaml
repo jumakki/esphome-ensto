@@ -73,7 +73,7 @@ esp32_ble_tracker:
     - if:
         condition:
           - lambda: |-
-              return id(ensto1_connection_state).has_state() == false || id(ensto1_connection_state).state == false;
+              return id(ensto1_connection_state).state == false;
         then:
           - lambda: |-
               id(ble_tracker).start_scan();
@@ -682,7 +682,7 @@ api:
       then:
         - if:
             condition:
-              lambda: !lambda 'return id(ensto1_connection_state).has_state() && id(ensto1_connection_state).state == true;'
+              lambda: !lambda 'return id(ensto1_connection_state);'
             then:
               - ble_client.ble_write:
                   id: ensto1
@@ -703,7 +703,7 @@ api:
       then:
         - if:
             condition:
-              lambda: !lambda 'return id(ensto1_connection_state).has_state() && id(ensto1_connection_state).state == true;'
+              lambda: !lambda 'return id(ensto1_connection_state);'
             then:
               - ble_client.ble_write:
                   id: ensto1
@@ -727,7 +727,7 @@ api:
       then:
         - if:
             condition:
-              lambda: !lambda 'return id(ensto1_connection_state).has_state() && id(ensto1_connection_state).state == true;'
+              lambda: !lambda 'return id(ensto1_connection_state);'
             then:
               - ble_client.ble_write:
                   id: ensto1
@@ -746,7 +746,7 @@ api:
       then:
         - if:
             condition:
-              lambda: !lambda 'return id(ensto1_connection_state).has_state() && id(ensto1_connection_state).state == true && (energy_unit_id >= 0 && energy_unit_id <= 5);'
+              lambda: !lambda 'return id(ensto1_connection_state) && (energy_unit_id >= 0 && energy_unit_id <= 5);'
             then:
               - ble_client.ble_write:
                   id: ensto1
@@ -768,7 +768,7 @@ api:
 #       then:
 #         - if:
 #             condition:
-#               lambda: !lambda 'return id(ensto1_connection_state).has_state() && id(ensto1_connection_state).state == true;'
+#               lambda: !lambda 'return id(ensto1_connection_state);'
 #             then:
 #               - ble_client.ble_write:
 #                   id: ensto1
@@ -800,4 +800,3 @@ climate:
       - lambda: !lambda ';' # heating control is handled in state machine
     idle_action:
       - lambda: !lambda ';' # idle control is handled in state machine
-      
