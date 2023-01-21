@@ -3,6 +3,64 @@
 YAML only implementation of Ensto thermostat support for ESPHome.  
 Requires ESPHome 2022.10.0 or later.
 
+## Usage
+
+Implementation supports different ways to control thermostats
+
+1. I want to change and schedule temperatures from Home Assistant just like I can with Ensto's App with Boost offsets. See [example 1](#1-setting-boost-offset-from-home-assistant-automation).
+2. I want to control thermostat's heating based on external temperature sensor in Home Assistant, because thermostat's internal temperature sensor varies too much and real room temperature is not stable. See [example 2](#2-usage-with-thermostat-climate-controller).
+
+In addition also following uses are possible
+
+3. I want to track in Home Assistant how much electricity the thermostat uses and how much it costs with current electricity price. See [example 3](#3-setting-electricity-price).
+4. I want to show status of different properties from the thermostat in Home Assistant. See [Exposed Entities](#exposed-entities) below.
+
+### Exposed Entities
+
+Following entities are exposed and usable from Home Assistant for reading values.
+
+| Name                                          | ID                                                 |
+|-----------------------------------------------|----------------------------------------------------|
+| Connection status (ON/OFF)                    | binary_sensor.ensto1_connection_status             |
+| Boost enabled (ON/OFF)                        | binary_sensor.ensto1_boost_status                  |
+| Heating relay active (ON/OFF)                 | binary_sensor.ensto1_relay_state                   |
+| Measured room temperature                     | sensor.ensto1_room_temperature                     |
+| Measured floor temperature                    | sensor.ensto1_floor_temperature                    |
+| Target temperature in thermostat              | sensor.ensto1_target_temperature                   |
+| Temperature boost minutes left                | sensor.ensto1_temperature_boost_minutes_left       |
+| Temperature boost offset                      | sensor.ensto1_temperature_boost_offset             |
+| Temperature calibration value                 | sensor.ensto1_temperature_calibration_value        |
+| Cumulative electricity price for current hour | sensor.ensto1_electricity_price_current_hour       |
+| Total electricity price for previous hour     | sensor.ensto1_electricity_price_previous_hour      |
+| Max Heating Power of thermostat               | sensor.ensto1_max_heating_power                    |
+| Electricity price per kWh                     | sensor.ensto1_price_per_kwh                        |
+| Currency ID (€, $, SEK, NOR, RUB)             | sensor.ensto1_currency_id                          |
+| Power consumption current hour (kWh)          | sensor.ensto1_power_consumption_current_hour_kwh   |
+| Power consumption previous hour (kWh)         | sensor.ensto1_power_consumption_previous_hour_kwh  |
+| Power consumption ratio current hour          | sensor.ensto1_power_consumption_ratio_current_hour |
+| Power consumption ratio previous hour         | sensor.ensto1_power_consumption_ratio_previous_hour|
+
+### Exposed Services
+
+Following services are exposed and usable from Home Assistant for setting new values.
+
+|ID                                 |Parameters        |Value range                  |
+|-----------------------------------|------------------|-----------------------------|
+|set_ensto1_temperature_boost_offset|boost_offset      |-20.00 - 20.00 °C            |
+|                                   |length_minutes    |0 - 300 minutes              |
+|set_ensto1_temperature_calibration |temperature_offset|-5.0 - 5.0 °C                |
+|set_ensto1_kwh_price               |energy_unit_id    |1=€, 2=SEK, 3=NOK, 4=RUB, 5=$|
+|                                   |price_per_kwh     |0.00 - 655.35                |
+|set_ensto1_max_power               |max_power         |0 - 65535 W                  |
+
+### Exposed Climate Controller
+
+Following Climate Thermostat Controller is exposed for controlling thermostat based on external temperature sensor.
+
+|Name             |ID                       |
+|-----------------|-------------------------|
+|Ensto1 Thermostat|climate.ensto1_thermostat|
+
 ## Installation
 
 ## Docker-compose
@@ -20,7 +78,7 @@ docker-compose up
 
 Open dashboard with web browser as instructed by docker-compose output (e.g. <http://0.0.0.0:6052>)
 
-Open ***Secrets*** menu from dashboard and fill values according to your environment. These values are used in [esphome-ensto.yaml](esphome-ensto.yaml). Add any home-assistant keys etc. in similar fashion to the Secrets and esphome-ensto.yaml if needed.
+Open ***Secrets*** menu from dashboard and fill values according to your environment. These values are used in [esphome-ensto.yaml](esphome-ensto.yaml). Add any home Assistant keys etc. in similar fashion to the Secrets and esphome-ensto.yaml if needed.
 
 ```yaml
 wifi_ssid: "REPLACEME"  
@@ -66,20 +124,65 @@ Thermostat needs to be set to pairing mode for it to accept client connection fr
 1. Press bluetooth pairing button from the thermostat for few seconds until blue led starts to blink.  
 1. Power up ESP32. It will automatically detect that the thermostat is in pairing mode and it will save the pairing information permanently for future connecions. After that ESP32 will automatically reconnect when ever it gets disconnected or it, or the thermostat, is restarted.
 
-It is recommended to adjust device's own temperature setting so that it is close to wanted temperature. That way any failure in Home Assistant, WiFi, ESP32, bluetooth or this code can be mitigated by turning the ESP32 off. Boost offsets used to control the thermostat have reasonable timeouts to give control back to the thermostat within about 30 minutes.
+It is recommended to adjust thermostat's own temperature setting so that it is close to wanted temperature. That way any failure in Home Assistant, WiFi, ESP32, Bluetooth or this code can be mitigated by turning the ESP32 off. Boost offsets used to control the thermostat have reasonable timeouts to give control back to the thermostat within about 30 minutes.
 
-## Integration to Home-assistant
+## Integration to Home Assistant
 
-Add ESPHome integration to Home-assistant from **Configuration - Devices & Services**
+Add ESPHome integration to Home Assistant from **Configuration - Devices & Services**
 
 Esphome-ensto should be automatically discovered with 1 device and multiple entities.
 There is an example how to add sensor to Lovelace UI in [home-assistant/ui-lovelace.yaml](home-assistant/ui-lovelace.yaml) file. It will show reading and statuses from the thermostat in graphs.
 
-### Usage with Thermostat Climate Controller
+## Usage examples
 
-Simplest way to control the thermostat is to add `climate.ensto1_thermostat` as a Thermostat card to Home Assistant. Turning Heat mode on will set boost modes accordingly to reach set temperature.
+### 1. Setting Boost offset from Home Assistant automation
 
-Thermostat Climate Controller requires setting external temperature sensor to [esphome-ensto.yaml](config/esphome-ensto.yaml) by changing `sensor.bedroom_temperature` to the ID of the sensor in Home Assistant that measures the actual temperature in the room where the thermostat is.
+Following automation reduces room temperature by 2°C every day between 23:00 and 06:00 using thermostat's Boost offset with negative value.
+
+Automation is triggered every minute. Trigger could be also change in thermostat's temperature or something else. Boost length is set to 55 minutes so that set boost offset remains also in case of a short connection breakage between Home Assistant and ESPHome, or ESPHome and thermostat. Additional condition is used to write new boost offset to thermostat only every 5 minutes to reduce writes.
+
+Automation below can be copy-pasted to Home Assistant by creating new automation, and selecting `Edit in YAML` from Options.
+
+> ***Note:*** The full name of Boost offset service depends on the name of used ESPHome node. In example below it is `esphome-ensto` causing full service name to be `esphome.esphome_ensto_set_ensto1_temperature_boost_offset`.
+
+> ***Note:*** Boost value should not be set when Thermostat Climate Controller is turned ON like in [example 2](#2-usage-with-thermostat-climate-controller) as any Boost set by this automation will be overwritten by Climate Controller. Only one method of controlling the thermostat should be used at the time.
+
+```yaml
+alias: Night time temperature drop
+trigger:
+  - platform: time_pattern
+    minutes: "1"
+condition:
+  - condition: numeric_state
+    entity_id: sensor.ensto1_temperature_boost_minutes_left
+    below: 50
+action:
+  - choose:
+      - conditions:
+          - condition: time
+            before: "06:00:00"
+            after: "23:00:00"
+        sequence:
+          - service: >-
+              esphome.esphome_ensto_set_ensto1_temperature_boost_offset
+            data:
+              boost_offset: -2
+              length_minutes: 55
+      - conditions: []
+        sequence:
+          - service: >-
+              esphome.esphome_ensto_set_ensto1_temperature_boost_offset
+            data:
+              boost_offset: 0
+              length_minutes: 55
+mode: single
+```
+
+### 2. Usage with Thermostat Climate Controller
+
+To control thermostat based on external temperature sensor, add `climate.ensto1_thermostat` as a Thermostat card to Home Assistant. Turning Heat mode ON will set boost modes accordingly to reach set temperature.
+
+Thermostat Climate Controller requires setting external temperature sensor to [esphome-ensto.yaml](config/esphome-ensto.yaml) by changing `sensor.bedroom_temperature` to the ID of the temperature sensor in Home Assistant that measures the actual temperature in the room where the thermostat is.
 
 ```yaml
 # External temperature sensor from Home Assistant for Climate Control
@@ -96,7 +199,9 @@ Thermostat Climate Controller requires setting external temperature sensor to [e
       #      send_first_at: 1
 ```
 
-### Advanced configuration
+> ***Note:*** Don't set Boost offset in automation, like in [example 1](#1-setting-boost-offset-from-home-assistant-automation), when Thermostat Climate Controller is turned ON. Instead control Thermostat Climate Controller directly with automation.
+
+#### Advanced configuration
 
 Thermostat Climate Controller functionality can be adjusted by changing the values of
 
@@ -124,6 +229,40 @@ if (thermos_diff < -1 * id(ensto1_thermostat).heat_overrun()) {
 ```
 
 Boost value is set on purpose to value that is too high or too low so that temperature reaches target temperature instead of device's thermostat keeping it just below the target, because of variations in its internal temperature measurements.
+
+## 3. Setting electricity price
+
+Electricity price can be tracked internally in Home Assistant, but thermostat supports also reading the price of consumed electricity directly from the thermostat.
+
+Current electricity price can be sent to thermostat, for example, with following automation, which sets day price at 07:00 to 0.31€/kWh and night price at 22:00 to 0.28€/kWh. Thermostat supports prices with only 2 decimals. Currency is Euro (€) with `energy_unit_id` value 1 (See [Exposed services](#exposed-services) for other options).
+
+> ***Note:*** The full name of kWh price service depends on the name of used ESPHome node. In example below it is `esphome-ensto` causing full service name to be `esphome.esphome_ensto_set_ensto1_kwh_price`.
+
+```yaml
+alias: Electricity price
+description: ""
+trigger:
+  - id: day
+    platform: time
+    at: "07:00:00"
+  - id: night
+    platform: time
+    at: "22:00:00"
+condition: []
+action:
+  - variables:
+      day_price: 0.31
+      night_price: 0.28
+      price: >
+        {{ day_price if trigger.id == 'day' else night_price }}
+  - service: esphome.esphome_ensto_set_ensto1_kwh_price
+    data:
+      energy_unit_id: 1
+      price_per_kwh: "{{ price }}"
+mode: single
+```
+
+Amount and price of consumed electricity for current hour can be read from `sensor.ensto1_power_consumption_current_hour_kwh` and `sensor.ensto1_electricity_price_current_hour`, and total of previous hour from `sensor.ensto1_power_consumption_previous_hour_kwh` and `sensor.ensto1_electricity_price_previous_hour`.
 
 ## Observations
 
