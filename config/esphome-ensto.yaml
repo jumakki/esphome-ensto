@@ -98,7 +98,7 @@ esp32_ble_tracker:
     - if:
         condition:
           - lambda: |-
-              return id(ensto1_connection_state) == false || id(ensto2_connection_state) == false;
+              return !id(ensto1_connection_state).has_state() || !id(ensto1_connection_state).state || !id(ensto2_connection_state).has_state() || !id(ensto2_connection_state).state;
         then:
           - lambda: |-
               id(ble_tracker).start_scan();
@@ -983,7 +983,7 @@ api:
 #       then:
 #         - if:
 #             condition:
-#               lambda: !lambda 'return id(ensto1_connection_state);'
+#               lambda: !lambda 'return id(ensto1_connection_state).has_state() && id(ensto1_connection_state).state;'
 #             then:
 #               - ble_client.ble_write:
 #                   id: ensto1
@@ -1005,7 +1005,7 @@ api:
         - if:
             condition:
               lambda: |-
-                  return id(ensto1_connection_state);
+                  return id(ensto1_connection_state).has_state() && id(ensto1_connection_state).state;
             then:
               - ble_client.ble_write:
                   id: ensto1
@@ -1029,7 +1029,7 @@ api:
 #       then:
 #         - if:
 #             condition:
-#               lambda: !lambda 'return id(ensto1_connection_state);'
+#               lambda: !lambda 'return id(ensto1_connection_state).has_state() && id(ensto1_connection_state).state;'
 #             then:
 #               - ble_client.ble_write:
 #                   id: ensto1
@@ -1048,7 +1048,7 @@ api:
 #       then:
 #         - if:
 #             condition:
-#               lambda: !lambda 'return id(ensto1_connection_state) && (energy_unit_id >= 0 && energy_unit_id <= 5);'
+#               lambda: !lambda 'return id(ensto1_connection_state).has_state() && id(ensto1_connection_state).state && (energy_unit_id >= 0 && energy_unit_id <= 5);'
 #             then:
 #               - ble_client.ble_write:
 #                   id: ensto1
@@ -1062,7 +1062,7 @@ api:
 #                       return {(uint8_t)(unit_id & 0xff), 0, (uint8_t)(value & 0xff), (uint8_t)((value >> 8) & 0xff)};
 #         - if:
 #             condition:
-#               lambda: !lambda 'return id(ensto2_connection_state) && (energy_unit_id >= 0 && energy_unit_id <= 5);'
+#               lambda: !lambda 'return id(ensto2_connection_state).has_state() && id(ensto2_connection_state).state && (energy_unit_id >= 0 && energy_unit_id <= 5);'
 #             then:
 #               - ble_client.ble_write:
 #                   id: ensto2
@@ -1085,7 +1085,7 @@ api:
 #       then:
 #         - if:
 #             condition:
-#               lambda: !lambda 'return id(ensto1_connection_state);'
+#               lambda: !lambda 'return id(ensto1_connection_state).has_state() && id(ensto1_connection_state).state;'
 #             then:
 #               - ble_client.ble_write:
 #                   id: ensto1
@@ -1108,7 +1108,7 @@ api:
       then:
         - if:
             condition:
-              lambda: !lambda 'return id(ensto2_connection_state);'
+              lambda: !lambda 'return id(ensto2_connection_state).has_state() && id(ensto2_connection_state).state;'
             then:
               - ble_client.ble_write:
                   id: ensto2
