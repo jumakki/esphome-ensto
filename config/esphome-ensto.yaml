@@ -702,7 +702,7 @@ api:
                   value: !lambda |-
                       int16_t value = round(boost_offset * 100);
                       value = std::max<int16_t>(-2000, std::min<int16_t>(value, 2000));
-                      uint16_t minutes = std::max(0, std::min(length_minutes, 300));
+                      uint16_t minutes = std::max<int>(0, std::min<int>(length_minutes, 300));
                       ESP_LOGI("ensto", "New temperature boost offset set to %d for %u minutes", value, minutes);
                       return {
                           1, // enable
