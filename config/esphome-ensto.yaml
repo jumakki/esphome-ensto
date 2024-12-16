@@ -40,8 +40,9 @@ esp32_ble_tracker:
     # Ensto sends one advertisement package every 200ms. With 320ms interval and 60ms window 
     # we will have a change to receive advertisement about once per second. That should be enough.
     # With defaults (320ms & 30ms) it would be once every 3 seconds.
+    # update: 90ms works much-much better with some cheap esp32 dev boards.
     interval: 320ms
-    window: 60ms
+    window: 90ms
     active: false
   on_ble_advertise:
     - mac_address: !secret ensto1_mac
