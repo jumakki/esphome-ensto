@@ -40,8 +40,9 @@ esp32_ble_tracker:
     # Ensto sends one advertisement package every 200ms. With 320ms interval and 60ms window 
     # we will have a change to receive advertisement about once per second. That should be enough.
     # With defaults (320ms & 30ms) it would be once every 3 seconds.
+    # update: 90ms works much-much better with some cheap esp32 dev boards.
     interval: 320ms
-    window: 60ms
+    window: 90ms
     active: false
   on_ble_advertise:
     - mac_address: !secret ensto1_mac
@@ -91,6 +92,12 @@ globals:
   - id: ensto1_interval_count
     type: uint32_t
     initial_value: '0'
+  - id: ensto1_previous_target_temperature
+    type: float
+    initial_value: "0.0"
+  - id: ensto1_characterics_written_not_read
+    type: uint32_t
+    initial_value: "0"
 
 ble_client:
   - mac_address: !secret ensto1_mac
@@ -561,9 +568,11 @@ interval:
           then:
             - lambda: |-
                 // Ensto disconnects if some characteristic is not read for 30 seconds
-                if (id(ensto1_interval_count) % 2 == 0) { // every 10 seconds
+                // every 10 seconds OR when needed
+                if (id(ensto1_interval_count) % 2 == 0 || id(ensto1_characterics_written_not_read) == 1) { 
                     id(ensto1_boost_characteristic).update();
                     id(ensto1_real_time_indication_characteristic).update();
+                    id(ensto1_characterics_written_not_read) = 0;
                     id(ensto1_state) = 4;
                 }
                 if (id(ensto1_interval_count) % 3 == 0) {
@@ -608,13 +617,19 @@ interval:
           condition:
             lambda: |-
                 return id(ensto1_state) >= 4 &&
-                       id(ensto1_interval_count) % 24 == 0 &&  // 2 minute minimum delay between updates
-                       id(ensto1_thermostat).mode != ClimateMode::CLIMATE_MODE_OFF &&
-                       id(ensto1_temp_boost_minutes_left).has_state() &&
-                       id(ensto1_temp_boost_offset).has_state() &&
-                       id(external_temperature_sensor).has_state() &&
-                       id(ensto1_target_temperature).has_state() &&
-                       id(ensto1_temp_calibration).has_state();
+                       (
+                        // 2 minute minimum delay between updates, if the target temperature has not changed.
+                        id(ensto1_thermostat).target_temperature != id(ensto1_previous_target_temperature) || 
+                        id(ensto1_interval_count) % 24 == 0 
+                       )  
+                       && (
+                         id(ensto1_thermostat).mode != ClimateMode::CLIMATE_MODE_OFF &&
+                         id(ensto1_temp_boost_minutes_left).has_state() &&
+                         id(ensto1_temp_boost_offset).has_state() &&
+                         id(external_temperature_sensor).has_state() &&
+                         id(ensto1_target_temperature).has_state() &&
+                         id(ensto1_temp_calibration).has_state()
+                       );
           then:
             - ble_client.ble_write:
                 id: ensto1
@@ -626,6 +641,10 @@ interval:
                     auto boost = id(ensto1_temp_boost_offset).get_state();
                     auto device_target = id(ensto1_target_temperature).get_state();
                     auto device_base = device_target - boost;
+
+                    // safe for next iteration
+                    id(ensto1_previous_target_temperature)  = target;                     
+                    id(ensto1_characterics_written_not_read) = 1;
                     
                     // first add boost to compensate difference between ensto's internal and our external temperature sensor
                     auto needed_boost = (target - device_base); 
