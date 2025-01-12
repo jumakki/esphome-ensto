@@ -1,7 +1,7 @@
 # esphome-ensto
 
 YAML only implementation of Ensto thermostat support for ESPHome.  
-Requires ESPHome 2022.10.0 or later.
+Requires ESPHome 2024.6.0 or later.
 
 ## Usage
 
