@@ -23,6 +23,7 @@ logger:
     ensto.receive: INFO            # DEBUG to show extra logging from this YAML about received data from characteristics
 
 ota:
+  platform: esphome
 
 wifi:
   ssid: !secret wifi_ssid
@@ -164,38 +165,44 @@ sensor:
           return NAN;
       }
       ESP_LOGI("ensto.receive", "Room: %.1f°C, Floor: %.1f°C, Target: %.1f°C", room_temp, floor_temp, target_temp);
-      static bool is_first = true;
+      static bool is_publish_needed = true;
+      static int last_publish_time = 0;
+      int current_time = millis() / 1000;
+      if (current_time - last_publish_time >= 60) { // update at least once per minute
+          last_publish_time = current_time;
+          is_publish_needed = true;
+      } 
       // statics to update values to home-assistant only when they change
       static auto last_target_temp = target_temp;
-      if (is_first || last_target_temp != target_temp) {
+      if (is_publish_needed || last_target_temp != target_temp) {
           last_target_temp = target_temp;
           id(ensto1_target_temperature).publish_state(target_temp);
       }
       static auto last_room_temp = room_temp;
-      if (is_first || last_room_temp != room_temp) {
+      if (is_publish_needed || last_room_temp != room_temp) {
           last_room_temp = room_temp;
           id(ensto1_room_temperature).publish_state(room_temp);
       }
       static auto last_floor_temp = floor_temp;
-      if (is_first || last_floor_temp != floor_temp) {
+      if (is_publish_needed || last_floor_temp != floor_temp) {
           last_floor_temp = floor_temp;
           id(ensto1_floor_temperature).publish_state(floor_temp);
       }
       auto relay_state = x[8] != 0;
       static auto last_relay_state = relay_state;
-      if (is_first || last_relay_state != relay_state) {
+      if (is_publish_needed || last_relay_state != relay_state) {
           last_relay_state = relay_state;
           id(ensto1_relay_state).publish_state(relay_state);
       }
       /*
       uint8_t heating_mode = x[14];
       static uint8_t last_heating_mode = heating_mode;
-      if (is_first || last_heating_mode != heating_mode) {
+      if (is_publish_needed || last_heating_mode != heating_mode) {
           last_heating_mode = heating_mode;
           id(ensto1_heating_mode).publish_state(heating_mode);
       }
       */
-      is_first = false;
+      is_publish_needed = false;
       return NAN;
 
   - platform: template
@@ -236,12 +243,12 @@ sensor:
 #     update_interval: never
 #     lambda: |-
 #       if (x.size() < 1) return NAN;
-#       static bool is_first = true;
+#       static bool is_publish_needed = true;
 #       bool is_adaptive = x[0];
 #       ESP_LOGI("ensto.receive", "Adaptive temp control mode: %d", x[0]);
 #       static bool last_is_adaptive = is_adaptive;
-#       if (is_first || last_is_adaptive != is_adaptive) {
-#           is_first = false;
+#       if (is_publish_needed || last_is_adaptive != is_adaptive) {
+#           is_publish_needed = false;
 #           last_is_adaptive = is_adaptive;
 #           id(ensto1_adaptive_temperature_control_status).publish_state(is_adaptive);
 #       }
@@ -263,12 +270,18 @@ sensor:
       auto temp_cal = (int16_t)(256 * x[1] + x[0]);
       ESP_LOGI("ensto.receive", "Temperature calibration value: %.1f°C", temp_cal / 10.0f);
       static auto last_temp_cal = temp_cal;
-      static bool is_first = true;
-      if (is_first || last_temp_cal != temp_cal) {
+      static bool is_publish_needed = true;
+      static int last_publish_time = 0;
+      int current_time = millis() / 1000;
+      if (current_time - last_publish_time >= 60) { // update at least once per minute
+          last_publish_time = current_time;
+          is_publish_needed = true;
+      } 
+      if (is_publish_needed || last_temp_cal != temp_cal) {
           last_temp_cal = temp_cal;
           id(ensto1_temp_calibration).publish_state(temp_cal / 10.0f);
       }
-      is_first = false;
+      is_publish_needed = false;
       return NAN;
   - platform: template
     name: "Ensto1 Temperature calibration value"
@@ -292,26 +305,32 @@ sensor:
       ESP_LOGD("ensto.receive", "Boost characteristic received with %d bytes", x.size());
       if (x.size() < 8) return NAN;
       auto is_boost_on = x[0] != 0;
-      static bool is_first = true;
+      static bool is_publish_needed = true;
+      static int last_publish_time = 0;
+      int current_time = millis() / 1000;
+      if (current_time - last_publish_time >= 60) { // update at least once per minute
+          last_publish_time = current_time;
+          is_publish_needed = true;
+      } 
       static auto last_is_boost_on = is_boost_on;
-      if (is_first || last_is_boost_on != is_boost_on) {
+      if (is_publish_needed || last_is_boost_on != is_boost_on) {
           last_is_boost_on = is_boost_on;
           id(ensto1_boost_status).publish_state(is_boost_on);
       }
       auto boost_offset = (int16_t)(256 * x[2] + x[1]);
       static auto last_boost_offset = boost_offset;
-      if (is_first || last_boost_offset != boost_offset) {
+      if (is_publish_needed || last_boost_offset != boost_offset) {
           last_boost_offset = boost_offset;
           id(ensto1_temp_boost_offset).publish_state(boost_offset / 100.0f);
       }
       auto boost_minutes_left = (uint16_t)(256 * x[7] + x[6]);
       ESP_LOGI("ensto.receive", "Boost: %s, offset: %.2f°C, minutes left: %d", (is_boost_on ? "ON" : "OFF"), boost_offset/100.0f, boost_minutes_left);
       static auto last_boost_minutes_left = boost_minutes_left;
-      if (is_first || last_boost_minutes_left != boost_minutes_left) {
+      if (is_publish_needed || last_boost_minutes_left != boost_minutes_left) {
           last_boost_minutes_left = boost_minutes_left;
           id(ensto1_temp_boost_minutes_left).publish_state(boost_minutes_left);
       }
-      is_first = false;
+      is_publish_needed = false;
       return NAN;
   - platform: template
     name: "Ensto1 Temperature boost offset"
@@ -643,7 +662,7 @@ interval:
                     auto device_base = device_target - boost;
 
                     // safe for next iteration
-                    id(ensto1_previous_target_temperature)  = target;                     
+                    id(ensto1_previous_target_temperature) = target;                     
                     id(ensto1_characterics_written_not_read) = 1;
                     
                     // first add boost to compensate difference between ensto's internal and our external temperature sensor
@@ -798,7 +817,6 @@ climate:
       - name: home  # default
         default_target_temperature_low: 20.0°C
         mode: heat
-#    default_target_temperature_low: 20°C # deprecated
     # these 2 are used in state machine above
     heat_deadband: 0.5°C     # The minimum temperature differential (temperature below the set point) before engaging extra heating
     heat_overrun: 0.5°C      # The minimum temperature differential (temperature above the set point) before disengaging heat
