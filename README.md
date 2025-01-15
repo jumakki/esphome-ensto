@@ -3,6 +3,11 @@
 YAML only implementation of Ensto thermostat support for ESPHome.  
 Requires ESPHome 2024.6.0 or later.
 
+## Update notes
+
+> [!IMPORTANT]  
+> When updating from release v0.9.0 or earlier, ensure you update the device using a serial cable. This is necessary because the framework was changed from `arduino` to `esp-idf`, and the partition table differs between the two frameworks. Over-the-Air Updates will not modify the partition table.
+
 ## Usage
 
 Implementation supports different ways to control thermostats
@@ -50,7 +55,7 @@ Following services are exposed and usable from Home Assistant for setting new va
 |                                   |length_minutes    |0 - 300 minutes              |
 |set_ensto1_temperature_calibration |temperature_offset|-5.0 - 5.0 °C                |
 |set_ensto1_kwh_price               |energy_unit_id    |1=€, 2=SEK, 3=NOK, 4=RUB, 5=$|
-|                                   |price_per_kwh     |0.00 - 655.35                |
+|                                   |price_per_kwh     |0.00 - 6.5535                |
 |set_ensto1_max_power               |max_power         |0 - 65535 W                  |
 
 ### Exposed Climate Controller
@@ -86,7 +91,8 @@ wifi_password: "REPLACEME"
 ensto1_mac: "RE:PL:AC:EM:YM:AC"
 ```
 
-> ***Note:*** Device MAC address can be found from Ensto's own official mobile App. Refer to user manual for how to connect the App with the thermostat.
+> [!TIP]  
+> Device MAC address can be found from Ensto's own official mobile App. Refer to user manual for how to connect the App with the thermostat.
 
 Change `board` from [esphome-ensto.yaml](esphome-ensto.yaml) according to your ESP32 board. List of possible values are available in <https://docs.platformio.org/en/latest/platforms/espressif32.html#boards>  
 Leave `platform` as "ESP32".  
@@ -112,7 +118,8 @@ devices:
     - /dev/ttyUSB0:/dev/ttyUSB0
 ```
 
-> ***Note:*** Restarting docker is needed if [docker-compose.yaml](docker-compose.yaml) is modified. Stop it with Ctrl+C and start it again.
+> [!IMPORTANT]  
+> Restarting docker is needed if [docker-compose.yaml](docker-compose.yaml) is modified. Stop it with Ctrl+C and start it again.
 
 All subsequent updates can be done via Wifi by selecting **Wirelessly** from the install menu.
 
@@ -143,9 +150,11 @@ Automation is triggered every minute. Trigger could be also change in thermostat
 
 Automation below can be copy-pasted to Home Assistant by creating new automation, and selecting `Edit in YAML` from Options.
 
-> ***Note:*** The full name of Boost offset service depends on the name of used ESPHome node. In example below it is `esphome-ensto` causing full service name to be `esphome.esphome_ensto_set_ensto1_temperature_boost_offset`.
+> [!NOTE]  
+> The full name of Boost offset service depends on the name of used ESPHome node. In example below it is `esphome-ensto` causing full service name to be `esphome.esphome_ensto_set_ensto1_temperature_boost_offset`.
 
-> ***Note:*** Boost value should not be set when Thermostat Climate Controller is turned ON like in [example 2](#2-usage-with-thermostat-climate-controller) as any Boost set by this automation will be overwritten by Climate Controller. Only one method of controlling the thermostat should be used at the time.
+> [!IMPORTANT]  
+> Boost value should not be set when Thermostat Climate Controller is turned ON like in [example 2](#2-usage-with-thermostat-climate-controller) as any Boost set by this automation will be overwritten by Climate Controller. Only one method of controlling the thermostat should be used at the time.
 
 ```yaml
 alias: Night time temperature drop
@@ -199,7 +208,8 @@ Thermostat Climate Controller requires setting external temperature sensor to [e
       #      send_first_at: 1
 ```
 
-> ***Note:*** Don't set Boost offset in automation, like in [example 1](#1-setting-boost-offset-from-home-assistant-automation), when Thermostat Climate Controller is turned ON. Instead control Thermostat Climate Controller directly with automation.
+> [!IMPORTANT]  
+> Don't set Boost offset in automation, like in [example 1](#1-setting-boost-offset-from-home-assistant-automation), when Thermostat Climate Controller is turned ON. Instead control Thermostat Climate Controller directly with automation.
 
 #### Advanced configuration
 
@@ -236,7 +246,8 @@ Electricity price can be tracked internally in Home Assistant, but thermostat su
 
 Current electricity price can be sent to thermostat, for example, with following automation, which sets day price at 07:00 to 0.31€/kWh and night price at 22:00 to 0.28€/kWh. Thermostat supports prices with only 2 decimals. Currency is Euro (€) with `energy_unit_id` value 1 (See [Exposed services](#exposed-services) for other options).
 
-> ***Note:*** The full name of kWh price service depends on the name of used ESPHome node. In example below it is `esphome-ensto` causing full service name to be `esphome.esphome_ensto_set_ensto1_kwh_price`.
+> [!NOTE]  
+> The full name of kWh price service depends on the name of used ESPHome node. In example below it is `esphome-ensto` causing full service name to be `esphome.esphome_ensto_set_ensto1_kwh_price`.
 
 ```yaml
 alias: Electricity price

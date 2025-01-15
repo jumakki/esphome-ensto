@@ -1,8 +1,12 @@
 esphome:
   name: esphome-ensto
-  platform: ESP32
+
+esp32:
   #board: esp32dev
   board: esp32doit-devkit-v1
+  #board: esp32-c3-devkitm-1
+  framework:
+    type: esp-idf
 
 # Enable logging. Note that too much logging will cause connections to break.
 logger:
