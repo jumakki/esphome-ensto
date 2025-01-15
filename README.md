@@ -6,7 +6,7 @@ Requires ESPHome 2024.6.0 or later.
 ## Update notes
 
 > [!IMPORTANT]  
-> When updating from release v0.9.0 or earlier, ensure you update the device using a serial cable. This is necessary because the framework was changed from `arduino` to `esp-idf`, and the partition table differs between the two frameworks. Over-the-Air Updates will not modify the partition table.
+> When updating from release v0.8.0 or earlier, ensure you update the device using a serial cable. This is necessary because the framework was changed from `arduino` to `esp-idf`, and the partition table differs between the two frameworks. Over-the-Air Updates will not modify the partition table.
 
 ## Usage
 
@@ -244,7 +244,7 @@ Boost value is set on purpose to value that is too high or too low so that tempe
 
 Electricity price can be tracked internally in Home Assistant, but thermostat supports also reading the price of consumed electricity directly from the thermostat.
 
-Current electricity price can be sent to thermostat, for example, with following automation, which sets day price at 07:00 to 0.0631€/kWh and night price at 22:00 to 0.0280€/kWh. Thermostat supports prices with 4 decimals. Currency is Euro (€) with `energy_unit_id` value 1 (See [Exposed services](#exposed-services) for other options).
+Current electricity price can be sent to thermostat, for example, with following automation, which sets day price at 07:00 to 0.1631€/kWh and night price at 22:00 to 0.0780€/kWh. Thermostat supports prices with 4 decimals. Currency is Euro (€) with `energy_unit_id` value 1 (See [Exposed services](#exposed-services) for other options).
 
 > [!NOTE]  
 > Official mobile App only supports prices with 2 decimals. Values written from Home Assistant will show as 100 times higher in official App.
@@ -265,8 +265,8 @@ trigger:
 condition: []
 action:
   - variables:
-      day_price: 0.0631
-      night_price: 0.028
+      day_price: 0.1631
+      night_price: 0.078
       price: >
         {{ day_price if trigger.id == 'day' else night_price }}
   - service: esphome.esphome_ensto_set_ensto1_kwh_price
