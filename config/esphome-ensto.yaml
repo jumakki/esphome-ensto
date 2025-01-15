@@ -392,14 +392,14 @@ sensor:
   - platform: template
     name: "Ensto1 Power consumption current hour (kWh)"
     id: ensto1_power_consumption_current_hour
-    accuracy_decimals: 3
+    accuracy_decimals: 5
     unit_of_measurement: "kWh"
     device_class: energy
     state_class: total_increasing
   - platform: template
     name: "Ensto1 Power consumption previous hour (kWh)"
     id: ensto1_power_consumption_previous_hour
-    accuracy_decimals: 3
+    accuracy_decimals: 5
     unit_of_measurement: "kWh"
     device_class: energy
     state_class: total
@@ -489,14 +489,14 @@ sensor:
     lambda: |-
       if (x.size() < 4) return NAN;
       auto currency = x[0];
-      auto price = (int16_t)(256 * x[3] + x[2]) / 100.0f;
+      auto price = (int16_t)(256 * x[3] + x[2]) / 10000.0f;
       std::string currency_str;
       if (currency == 1) currency_str = "€";
       if (currency == 2) currency_str = "SEK";
       if (currency == 3) currency_str = "NOK";
       if (currency == 4) currency_str = "RUB";
       if (currency == 5) currency_str = "$";
-      ESP_LOGI("ensto.receive", "Energy unit: currency=%d (%s), price=%.2f", currency, currency_str.c_str(), price);
+      ESP_LOGI("ensto.receive", "Energy unit: currency=%d (%s), price=%.4f", currency, currency_str.c_str(), price);
       id(ensto1_currency_id).publish_state(currency);
       id(ensto1_price_per_kwh).publish_state(price);
       return NAN;
@@ -507,7 +507,7 @@ sensor:
   - platform: template
     name: "Ensto1 Price per kWh"
     id: ensto1_price_per_kwh
-    accuracy_decimals: 2
+    accuracy_decimals: 4
 
 # Factory reset ID
   - platform: ble_client
@@ -766,7 +766,7 @@ api:
                       uint16_t value = std::max<int32_t>(0, std::min<int32_t>(max_power, std::numeric_limits<uint16_t>::max()));
                       ESP_LOGI("ensto", "New max heating power value set to %dW", value);
                       return {(uint8_t)(value & 0xff), (uint8_t)((value >> 8) & 0xff)};
-# Price of electricity per kWh (e.g. 0.09€). Energy unit IDs: use_previous=0, EUR=1, SEK=2, NOK=3, RUB=4, USD=5
+# Price of electricity per kWh (e.g. 0.0925€). Energy unit IDs: use_previous=0, EUR=1, SEK=2, NOK=3, RUB=4, USD=5
     - service: set_ensto1_kwh_price
       variables:
         energy_unit_id: int
@@ -783,8 +783,8 @@ api:
                   value: !lambda |-
                       auto unit_id = energy_unit_id;
                       if (unit_id == 0 && id(ensto1_currency_id).has_state()) unit_id = id(ensto1_currency_id).get_state();
-                      uint16_t value = std::max<uint16_t>(0, std::min<uint16_t>(price_per_kwh * 100, std::numeric_limits<uint16_t>::max()));
-                      ESP_LOGI("ensto", "New price of electricity per kWh set to %.2f (unit ID=%d)", price_per_kwh, unit_id);
+                      uint16_t value = std::max<uint16_t>(0, std::min<uint16_t>(price_per_kwh * 10000, std::numeric_limits<uint16_t>::max()));
+                      ESP_LOGI("ensto", "New price of electricity per kWh set to %.4f (unit ID=%d)", price_per_kwh, unit_id);
                       return {(uint8_t)(unit_id & 0xff), 0, (uint8_t)(value & 0xff), (uint8_t)((value >> 8) & 0xff)};
 
 # # Led brightness percentage (0-100)
