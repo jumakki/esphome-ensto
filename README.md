@@ -244,7 +244,10 @@ Boost value is set on purpose to value that is too high or too low so that tempe
 
 Electricity price can be tracked internally in Home Assistant, but thermostat supports also reading the price of consumed electricity directly from the thermostat.
 
-Current electricity price can be sent to thermostat, for example, with following automation, which sets day price at 07:00 to 0.31€/kWh and night price at 22:00 to 0.28€/kWh. Thermostat supports prices with only 2 decimals. Currency is Euro (€) with `energy_unit_id` value 1 (See [Exposed services](#exposed-services) for other options).
+Current electricity price can be sent to thermostat, for example, with following automation, which sets day price at 07:00 to 0.0631€/kWh and night price at 22:00 to 0.0280€/kWh. Thermostat supports prices with 4 decimals. Currency is Euro (€) with `energy_unit_id` value 1 (See [Exposed services](#exposed-services) for other options).
+
+> [!NOTE]  
+> Official mobile App only supports prices with 2 decimals. Values written from Home Assistant will show as 100 times higher in official App.
 
 > [!NOTE]  
 > The full name of kWh price service depends on the name of used ESPHome node. In example below it is `esphome-ensto` causing full service name to be `esphome.esphome_ensto_set_ensto1_kwh_price`.
@@ -262,8 +265,8 @@ trigger:
 condition: []
 action:
   - variables:
-      day_price: 0.31
-      night_price: 0.28
+      day_price: 0.0631
+      night_price: 0.028
       price: >
         {{ day_price if trigger.id == 'day' else night_price }}
   - service: esphome.esphome_ensto_set_ensto1_kwh_price
