@@ -96,11 +96,40 @@ ensto1_mac: "RE:PL:AC:EM:YM:AC"
 
 Change `board` from [esphome-ensto.yaml](esphome-ensto.yaml) according to your ESP32 board. List of possible values are available in <https://docs.platformio.org/en/latest/platforms/espressif32.html#boards>  
 Leave `platform` as "ESP32".  
-For example, correct values for DOIT DEVKIT V1 board are:
+For example, correct value for DOIT DEVKIT V1 board is:
 
 ```yaml
-platform: ESP32  
 board: esp32doit-devkit-v1
+```
+
+### Using the `esphome-ensto.yaml` File with Multiple ESP32 Boards and Thermostats
+
+If you want to use the original [`esphome-ensto.yaml`](esphome-ensto.yaml) file without modifications for multiple ESP32 boards and thermostats, follow these steps:
+
+1. **Copy or Clone the Repository**:  
+   Copy or clone the entire GitHub repository into a subfolder within your ESPHome configuration directory (e.g., `config/esphome-ensto/`).
+
+2. **Create a Minimal Main YAML File**:  
+   Create a new YAML file (e.g., `bathroom_ensto.yaml`) in your configuration directory to act as the main file for each device. This file will contain device-specific substitutions (like device name, MAC address, and external temperature sensor).
+
+3. **Include the Original File**:  
+   Use the `!include` directive to include the original `esphome-ensto.yaml` file. Provide your device-specific substitutions in the main YAML file.
+
+#### Example: `bathroom_ensto.yaml`
+
+Here’s an example of how to include the original configuration file while specifying device-specific settings:
+
+```yaml
+substitutions:
+  name: bathroom-ensto
+  devicename: bathroom_ensto
+  ui_devicename: Bathroom
+  mac: !secret bathroom_thermostat_mac
+  external_temperature_sensor: sensor.bathroom_temperature
+  board: esp32doit-devkit-v1
+
+<<: !include esphome-ensto/config/esphome-ensto.yaml
+
 ```
 
 ### Install ESPHome to ESP32
