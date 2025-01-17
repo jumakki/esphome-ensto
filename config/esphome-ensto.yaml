@@ -47,6 +47,11 @@ wifi:
 #web_server:
 #  port: 80
 
+time:
+  id: ha_time
+  platform: homeassistant
+  timezone: "GMT0"
+
 esp32_ble_tracker:
   id: ble_tracker
   scan_parameters:
@@ -111,6 +116,8 @@ globals:
   - id: ${devicename}_characterics_written_not_read
     type: uint32_t
     initial_value: "0"
+  - id: ${devicename}_time_sync_needed
+    type: bool
 
 ble_client:
   - mac_address: ${mac}
@@ -428,6 +435,37 @@ sensor:
     unit_of_measurement: "€" # hard-coded unit
     state_class: total
 
+# Time (set from App)
+  - platform: ble_client
+    type: characteristic
+    ble_client_id: ${devicename}
+    id: ${devicename}_time_characteristic
+    internal: true
+    service_uuid: F49CEFD5-209B-4531-99BD-89FE2909931A
+    characteristic_uuid: b43f918a-b084-45c8-9b60-df648c4a4a1e
+    notify: false
+    update_interval: never
+    lambda: |-
+      if (x.size() < 7) return NAN;
+      struct tm time_info = {};
+      time_info.tm_year = static_cast<int>(256 * x[1] + x[0]) - 1900;
+      time_info.tm_mon = static_cast<int>(x[2]) - 1;
+      time_info.tm_mday = static_cast<int>(x[3]);
+      time_info.tm_hour = static_cast<int>(x[4]);
+      time_info.tm_min = static_cast<int>(x[5]);
+      time_info.tm_sec = static_cast<int>(x[6]);
+      time_t epoch = mktime(&time_info);
+      if (id(ha_time).utcnow().is_valid()) {
+          auto time = id(ha_time).utcnow();
+          auto diff = static_cast<int>(fabs(difftime(epoch, time.timestamp)));
+          // allow +-3 second difference from delays
+          if (diff > 3) {
+              ESP_LOGI("ble_client.receive", "Time sync needed!");
+              id(${devicename}_time_sync_needed) = true;
+          }
+      }
+      return NAN;
+
 # Max heating power (set manually from App)
   - platform: ble_client
     type: characteristic
@@ -634,6 +672,7 @@ interval:
                 if (id(${devicename}_interval_count) % 12 == 0) { // every 60 seconds
                     id(${devicename}_power_consumption_characteristic).update();
                     id(${devicename}_energy_unit_characteristic).update();
+                    id(${devicename}_time_characteristic).update();
                 }
                 if (id(${devicename}_interval_count) % 13 == 0) { // every 65 seconds
                     // id(${devicename}_adaptive_temp_control_characteristic).update();
@@ -643,6 +682,33 @@ interval:
                 if (id(${devicename}_interval_count) % 61 == 0) { // every ~5 minutes
                     id(${devicename}_heating_power_characteristic).update();                    
                 }
+      # 3+ = connected and thermostat time out of sync
+      - if:
+          condition:
+            lambda: |-
+                return id(${devicename}_state) >= 3 && id(${devicename}_time_sync_needed) && id(ha_time).utcnow().is_valid();
+          then:
+            - ble_client.ble_write:
+                id: ${devicename}
+                service_uuid: F49CEFD5-209B-4531-99BD-89FE2909931A
+                characteristic_uuid: b43f918a-b084-45c8-9b60-df648c4a4a1e
+                value: !lambda |-
+                    auto now = id(ha_time).utcnow();
+                    uint8_t val[7] = {
+                        (uint8_t)(now.year & 0xff),
+                        (uint8_t)((now.year >> 8) & 0xff),
+                        (uint8_t)(now.month & 0xff),
+                        (uint8_t)(now.day_of_month & 0xff),
+                        (uint8_t)(now.hour & 0xff),
+                        (uint8_t)(now.minute & 0xff),
+                        (uint8_t)(now.second & 0xff),
+                    };
+                    char buf[20];
+                    now.strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S");
+                    ESP_LOGI("ensto", "Time set to %s (UTC)", buf);
+                    id(${devicename}_time_sync_needed) = false;
+                    return {val[0], val[1], val[2], val[3], val[4], val[5], val[6]};
+
       # 4 = Climate Controller boost
       - if:
           condition:
