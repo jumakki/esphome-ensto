@@ -175,7 +175,7 @@ There is an example how to add sensor to Lovelace UI in [home-assistant/ui-lovel
 
 Following automation reduces room temperature by 2°C every day between 23:00 and 06:00 using thermostat's Boost offset with negative value.
 
-Automation is triggered every minute. Trigger could be also change in thermostat's temperature or something else. Boost length is set to 55 minutes so that set boost offset remains also in case of a short connection breakage between Home Assistant and ESPHome, or ESPHome and thermostat. Additional condition is used to write new boost offset to thermostat only every 5 minutes to reduce writes.
+Automation is triggered every minute. Trigger could be also change in thermostat's temperature or something else. Boost length is set to 55 minutes so that set boost offset remains also in case of a short connection breakage between Home Assistant and ESPHome, or ESPHome and thermostat. Additional condition is used to write new boost offset to thermostat every 6 minutes to reduce writes. The second additional condition prevents starting automation needlessly off-schedule. There is a 10 minute grace period after end time, where the boost offset and length are set to 0.
 
 Automation below can be copy-pasted to Home Assistant by creating new automation, and selecting `Edit in YAML` from Options.
 
@@ -189,11 +189,14 @@ Automation below can be copy-pasted to Home Assistant by creating new automation
 alias: Night time temperature drop
 trigger:
   - platform: time_pattern
-    minutes: "1"
+    minutes: /1
 condition:
   - condition: numeric_state
     entity_id: sensor.ensto1_temperature_boost_minutes_left
     below: 50
+  - condition: time
+    before: "06:10:00"
+    after: "23:00:00"
 action:
   - choose:
       - conditions:
@@ -201,18 +204,19 @@ action:
             before: "06:00:00"
             after: "23:00:00"
         sequence:
-          - service: >-
-              esphome.esphome_ensto_set_ensto1_temperature_boost_offset
-            data:
+          - data:
               boost_offset: -2
               length_minutes: 55
-      - conditions: []
+            action: esphome.esphome_ensto_set_ensto1_temperature_boost_offset
+      - conditions:
+          - condition: numeric_state
+            entity_id: sensor.ensto1_temperature_boost_offset
+            below: 0
         sequence:
-          - service: >-
-              esphome.esphome_ensto_set_ensto1_temperature_boost_offset
-            data:
+          - data:
               boost_offset: 0
-              length_minutes: 55
+              length_minutes: 0
+            action: esphome.esphome_ensto_set_ensto1_temperature_boost_offset
 mode: single
 ```
 
