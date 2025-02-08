@@ -399,15 +399,11 @@ sensor:
     id: ${devicename}_power_consumption_ratio_current_hour
     accuracy_decimals: 0
     unit_of_measurement: "%"
-    device_class: power_factor
-    state_class: total_increasing
   - platform: template
     name: "${ui_devicename} Power consumption ratio previous hour"
     id: ${devicename}_power_consumption_ratio_previous_hour
     accuracy_decimals: 0
     unit_of_measurement: "%"
-    device_class: power_factor
-    state_class: total
   - platform: template
     name: "${ui_devicename} Power consumption current hour (kWh)"
     id: ${devicename}_power_consumption_current_hour
