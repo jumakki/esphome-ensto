@@ -3,6 +3,9 @@
 YAML only implementation of Ensto thermostat support for ESPHome.  
 Requires ESPHome 2024.6.0 or later.
 
+> [!NOTE]  
+> For direct Home Assistant integration without need of ESP32/ESPHome, see [hass_ensto_ble](https://github.com/ExMacro/hass_ensto_ble).
+
 ## Update notes
 
 > [!IMPORTANT]  
